@@ -53,6 +53,77 @@ const REC_CLASSES: Record<string, string> = {
   'DECREASE': 'signal-badge signal-negative'
 };
 
+// Info Button Component with Tooltip
+interface InfoButtonProps {
+  isActive: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        style={{
+          marginLeft: '6px',
+          width: '16px',
+          height: '16px',
+          borderRadius: '50%',
+          border: '1px solid var(--orange-bright)',
+          background: isActive ? 'var(--orange-bright)' : 'transparent',
+          color: isActive ? 'white' : 'var(--orange-bright)',
+          fontSize: '10px',
+          fontFamily: 'DM Mono, monospace',
+          fontWeight: '500',
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'all 0.2s ease'
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.background = 'rgba(255,87,34,0.1)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) {
+            e.currentTarget.style.background = 'transparent';
+          }
+        }}
+      >
+        i
+      </button>
+      {isActive && (
+        <div style={{
+          position: 'absolute',
+          top: '24px',
+          right: '0',
+          zIndex: 1000,
+          background: 'white',
+          border: '2px solid var(--orange-bright)',
+          borderRadius: '8px',
+          padding: '16px',
+          minWidth: '320px',
+          maxWidth: '420px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          fontSize: '11px',
+          lineHeight: '1.5',
+          overflowWrap: 'break-word',
+          wordWrap: 'break-word',
+          wordBreak: 'normal'
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [market, setMarket] = useState<MarketName>('Maharashtra');
   const [scr, setSCR] = useState<string>('Maharashtra Overall');
@@ -65,6 +136,7 @@ export default function App() {
   const [search, setSearch] = useState<string>('');
   const [sortCol, setSortCol] = useState<string>('santoorReach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const prevOptimizedRef = useRef(false);
 
   const marketData = santoorData.markets[market];
@@ -83,7 +155,7 @@ export default function App() {
   const genres = useMemo(() => ['All', ...new Set(rawChannels.map(c => c.genre))], [rawChannels]);
 
   const displayChannels = useMemo(() => {
-    let filtered = showAll ? rawChannels : filterRelevantChannels(rawChannels);
+    let filtered = showAll ? rawChannels : filterRelevantChannels(rawChannels, 'actionable');
     if (genre !== 'All') filtered = filtered.filter(c => c.genre === genre);
     if (search) filtered = filtered.filter(c => c.channel.toLowerCase().includes(search.toLowerCase()));
     return [...filtered].sort((a, b) => {
@@ -102,6 +174,21 @@ export default function App() {
   useEffect(() => {
     prevOptimizedRef.current = isOptimized;
   }, [isOptimized]);
+
+  // Close tooltip when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('button') && !target.closest('[style*="position: absolute"]')) {
+        setActiveTooltip(null);
+      }
+    };
+
+    if (activeTooltip) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [activeTooltip]);
 
   const summary = useMemo(() => {
     const rel = filterRelevantChannels(rawChannels);
@@ -438,19 +525,25 @@ export default function App() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                cursor: 'pointer',
-                fontFamily: 'DM Mono, monospace',
-                fontSize: '12px',
-                color: 'var(--text-secondary)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em'
+                cursor: 'pointer'
               }}>
                 <input
                   type="checkbox"
                   checked={showAll}
                   onChange={e => setShowAll(e.target.checked)}
                 />
-                SHOW ALL CHANNELS
+                <span style={{
+                  fontFamily: 'DM Mono, monospace',
+                  fontSize: '12px',
+                  color: 'var(--text-secondary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em'
+                }}>
+                  {showAll
+                    ? `SHOWING ALL CHANNELS (${displayChannels.length})`
+                    : `ACTIONABLE CHANNELS (${displayChannels.length}) - >1% REACH OR REAL OPPORTUNITIES`
+                  }
+                </span>
               </label>
             </div>
           </div>
@@ -482,12 +575,129 @@ export default function App() {
                       onClick={() => !['status', 'rec', 'reason', 'comp1', 'comp2'].includes(col.key) && handleSort(col.key)}
                       className={!['status', 'rec', 'reason', 'comp1', 'comp2'].includes(col.key) ? 'sortable' : ''}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
                         {col.label}
                         {sortCol === col.key && (
                           <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>
                             {sortDir === 'asc' ? '↑' : '↓'}
                           </span>
+                        )}
+                        {col.key === 'status' && (
+                          <InfoButton
+                            isActive={activeTooltip === 'status'}
+                            onClick={() => setActiveTooltip(activeTooltip === 'status' ? null : 'status')}
+                          >
+                            <div style={{ fontFamily: 'DM Mono, monospace' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                                📊 CHANNEL STATUS LEGEND
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-positive" style={{ minWidth: '72px', fontSize: '9px' }}>🏆 DOMINANT</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Index ≥150% vs competition</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-positive" style={{ minWidth: '72px', fontSize: '9px' }}>↑ LEADING</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Index 100-149%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-warning" style={{ minWidth: '72px', fontSize: '9px' }}>~ CLOSE</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Index 80-99%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-negative" style={{ minWidth: '72px', fontSize: '9px' }}>↓ BEHIND</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Index 50-79%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-negative" style={{ minWidth: '72px', fontSize: '9px' }}>⚠ CRITICAL</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Index &lt;50%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-purple" style={{ minWidth: '72px', fontSize: '9px' }}>+ OPPORTUNITY</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Santoor 0%, Comp ≥2%</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span className="signal-badge signal-info" style={{ minWidth: '72px', fontSize: '9px' }}>★ MONOPOLY</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>Only Santoor present</span>
+                                </div>
+                              </div>
+                            </div>
+                          </InfoButton>
+                        )}
+                        {col.key === 'indexVsCompetition' && (
+                          <InfoButton
+                            isActive={activeTooltip === 'index'}
+                            onClick={() => setActiveTooltip(activeTooltip === 'index' ? null : 'index')}
+                          >
+                            <div style={{ fontFamily: 'DM Mono, monospace', width: '100%' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                                📈 INDEX EXPLAINED
+                              </div>
+                              <div style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '11px', lineHeight: '1.6' }}>
+                                <strong>Index = (Santoor / Competitor) × 100</strong>
+                              </div>
+                              <div style={{ color: 'var(--text-secondary)', marginBottom: '12px', fontSize: '10px', lineHeight: '1.5' }}>
+                                <div style={{ marginBottom: '4px' }}>• <strong>Index &gt; 100</strong>: Santoor outperforms</div>
+                                <div style={{ marginBottom: '4px' }}>• <strong>Index = 100</strong>: Equal to competitor</div>
+                                <div style={{ marginBottom: '4px' }}>• <strong>Index &lt; 100</strong>: Lagging behind</div>
+                              </div>
+                              <div style={{
+                                background: 'rgba(255,87,34,0.05)',
+                                padding: '8px',
+                                borderRadius: '4px',
+                                borderLeft: '3px solid var(--orange-bright)',
+                                fontSize: '10px',
+                                lineHeight: '1.5',
+                                wordBreak: 'break-word'
+                              }}>
+                                <div><strong>Example:</strong></div>
+                                <div>Santoor 5% vs Comp 10%</div>
+                                <div>= Index 50 (CRITICAL)</div>
+                              </div>
+                            </div>
+                          </InfoButton>
+                        )}
+                        {col.key === 'rec' && (
+                          <InfoButton
+                            isActive={activeTooltip === 'action'}
+                            onClick={() => setActiveTooltip(activeTooltip === 'action' ? null : 'action')}
+                          >
+                            <div style={{ fontFamily: 'DM Mono, monospace', width: '100%' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                                🎯 RECOMMENDED ACTIONS
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                  <span className="signal-badge signal-positive" style={{ minWidth: '68px', fontSize: '9px', flexShrink: 0 }}>↑ INCREASE</span>
+                                  <span style={{ color: 'var(--text-secondary)', fontSize: '10px', lineHeight: '1.4' }}>Boost spend - lagging competition</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                  <span className="signal-badge signal-purple" style={{ minWidth: '68px', fontSize: '9px', flexShrink: 0 }}>+ ADD</span>
+                                  <span style={{ color: 'var(--text-secondary)', fontSize: '10px', lineHeight: '1.4' }}>Enter new untapped channel</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                  <span className="signal-badge signal-info" style={{ minWidth: '68px', fontSize: '9px', flexShrink: 0 }}>— MAINTAIN</span>
+                                  <span style={{ color: 'var(--text-secondary)', fontSize: '10px', lineHeight: '1.4' }}>Keep current spend level</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                                  <span className="signal-badge signal-negative" style={{ minWidth: '68px', fontSize: '9px', flexShrink: 0 }}>↓ DECREASE</span>
+                                  <span style={{ color: 'var(--text-secondary)', fontSize: '10px', lineHeight: '1.4' }}>Reduce and reallocate</span>
+                                </div>
+                              </div>
+                              <div style={{
+                                background: 'rgba(255,87,34,0.05)',
+                                padding: '8px',
+                                borderRadius: '4px',
+                                borderLeft: '3px solid var(--orange-bright)',
+                                fontSize: '10px',
+                                lineHeight: '1.5',
+                                wordBreak: 'break-word'
+                              }}>
+                                <div><strong>💡 Strategy:</strong></div>
+                                <div>Move budget from DECREASE to INCREASE/ADD channels</div>
+                              </div>
+                            </div>
+                          </InfoButton>
                         )}
                       </div>
                     </th>
@@ -539,10 +749,10 @@ export default function App() {
                           <td style={{
                             color: 'var(--text-tertiary)',
                             fontSize: '12px',
-                            maxWidth: '200px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
+                            maxWidth: '250px',
+                            whiteSpace: 'normal',
+                            lineHeight: '1.4',
+                            wordBreak: 'break-word'
                           }}>
                             {opt?.reason || '-'}
                           </td>

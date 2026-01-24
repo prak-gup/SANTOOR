@@ -27,14 +27,41 @@ export interface OptimizationResult {
 }
 
 // ============================================================
-// FILTER: Remove meaningless channels (0% everywhere)
+// FILTER: Three-tier context-aware filtering for actionable channels
 // ============================================================
-export function filterRelevantChannels(channels: ChannelRecord[]): ChannelRecord[] {
-  return channels.filter(ch =>
-    ch.santoorReach > 0.5 ||
-    ch.maxCompReach > 0.5 ||
-    ch.channelShare > 0.1
-  );
+/**
+ * Filters channels to show only actionable opportunities for media planners.
+ *
+ * Uses three-tier logic:
+ * 1. Active Santoor channels (>1% reach OR >0.5% reach with >0.5% share)
+ * 2. Real opportunities (0% Santoor, >=2% competitor, >=1% share)
+ * 3. Emerging channels (0.5-1% reach with >0.5% share validation)
+ */
+export function filterRelevantChannels(
+  channels: ChannelRecord[],
+  filterMode: 'actionable' | 'all' = 'actionable'
+): ChannelRecord[] {
+  if (filterMode === 'all') {
+    return channels;
+  }
+
+  return channels.filter(ch => {
+    // Tier 1: Active Santoor channels with meaningful presence
+    const isActiveSantoorChannel = ch.santoorReach > 1.0 ||
+                                   (ch.santoorReach > 0.5 && ch.channelShare > 0.5);
+
+    // Tier 2: Real opportunities (aligned with optimization engine)
+    const isRealOpportunity = ch.santoorReach === 0 &&
+                              ch.maxCompReach >= 2.0 &&
+                              ch.channelShare >= 1.0;
+
+    // Tier 3: Emerging channels (lower bar but must show BOTH signals)
+    const isEmergingChannel = ch.santoorReach > 0.5 &&
+                             ch.santoorReach <= 1.0 &&
+                             ch.channelShare > 0.5;
+
+    return isActiveSantoorChannel || isRealOpportunity || isEmergingChannel;
+  });
 }
 
 // ============================================================

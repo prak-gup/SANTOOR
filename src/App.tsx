@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import '@fontsource/dm-mono/400.css';
 import '@fontsource/dm-mono/500.css';
 import '@fontsource/outfit/400.css';
@@ -11,6 +11,13 @@ import {
   runOptimization,
 } from './utils/optimization';
 import type { ChannelRecord } from './utils/optimization';
+import TabNavigation from './components/TabNavigation';
+import TimebandSelector from './components/TimebandSelector';
+import TimebandHeatmap from './components/TimebandHeatmap';
+import PlannerInsightsSummary from './components/PlannerInsightsSummary';
+import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_LABELS } from './utils/timebandProcessor';
+import { getTimebandStatus, getTimebandRecommendation } from './utils/timebandAnalysis';
+import { generateSimplifiedInsights } from './utils/plannerInsights';
 
 type MarketName = string;
 
@@ -125,6 +132,10 @@ function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
 }
 
 export default function App() {
+  // Tab navigation state
+  const [activeTab, setActiveTab] = useState<'channel' | 'timeband'>('channel');
+
+  // Core state
   const [market, setMarket] = useState<MarketName>('Maharashtra');
   const [scr, setSCR] = useState<string>('Maharashtra Overall');
   const [intensity, setIntensity] = useState<number>(15);
@@ -139,11 +150,30 @@ export default function App() {
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
   const prevOptimizedRef = useRef(false);
 
+  // Timeband state (only for timeband tab)
+  const [selectedTimeband, setSelectedTimeband] = useState<string>('all');
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  const [heatmapMetric, setHeatmapMetric] = useState<'reach' | 'gap' | 'atcIndex'>('reach');
+  const [selectedChannelForInsights, setSelectedChannelForInsights] = useState<string | null>(null);
+
   const marketData = santoorData.markets[market];
   const scrs = marketData?.scrs || [];
   const competitors = marketData?.competitors || [];
   const optType = marketData?.optimizationType || 'Reach';
   const rawChannels: ChannelRecord[] = marketData?.channelData[scr] || [];
+
+  // Enrich channels with timeband data (using sample data for now)
+  const enrichedChannels = useMemo(() => {
+    return rawChannels.map(channel => {
+      if (channel.timebands && channel.timebands.length > 0) {
+        // Already has timeband data
+        return channel;
+      }
+      // Generate sample timeband data
+      const sampleTimebands = generateSampleTimebandData(channel, market);
+      return enrichChannelWithTimebands(channel, sampleTimebands);
+    });
+  }, [rawChannels, market]);
 
   useEffect(() => { setIsOptimized(false); setResults(new Map()); }, [market, scr]);
   useEffect(() => {
@@ -152,17 +182,27 @@ export default function App() {
     else if (scrs.length > 0) setSCR(scrs[0]);
   }, [market, scrs]);
 
-  const genres = useMemo(() => ['All', ...new Set(rawChannels.map(c => c.genre))], [rawChannels]);
+  const genres = useMemo(() => ['All', ...new Set(enrichedChannels.map(c => c.genre))], [enrichedChannels]);
 
   const displayChannels = useMemo(() => {
-    let filtered = showAll ? rawChannels : filterRelevantChannels(rawChannels, 'actionable');
+    let filtered = showAll ? enrichedChannels : filterRelevantChannels(enrichedChannels, 'actionable');
     if (genre !== 'All') filtered = filtered.filter(c => c.genre === genre);
     if (search) filtered = filtered.filter(c => c.channel.toLowerCase().includes(search.toLowerCase()));
+
+    // Filter by timeband only when in timeband tab
+    if (activeTab === 'timeband' && selectedTimeband !== 'all') {
+      filtered = filtered.filter(ch => {
+        if (!ch.timebands) return false;
+        const tb = ch.timebands.find(t => t.timeband === selectedTimeband);
+        return tb && tb.santoorReach > 0;
+      });
+    }
+
     return [...filtered].sort((a, b) => {
       const aV = (a as any)[sortCol] ?? 0, bV = (b as any)[sortCol] ?? 0;
       return sortDir === 'asc' ? (aV > bV ? 1 : -1) : (aV < bV ? 1 : -1);
     });
-  }, [rawChannels, showAll, genre, search, sortCol, sortDir]);
+  }, [enrichedChannels, showAll, genre, search, sortCol, sortDir, selectedTimeband, activeTab]);
 
   useEffect(() => {
     if (prevOptimizedRef.current && displayChannels.length > 0) {
@@ -191,21 +231,53 @@ export default function App() {
   }, [activeTooltip]);
 
   const summary = useMemo(() => {
-    const rel = filterRelevantChannels(rawChannels);
+    const rel = filterRelevantChannels(enrichedChannels);
     const withS = rel.filter(c => c.santoorReach > 0);
     const opp = rel.filter(c => c.santoorReach === 0 && c.maxCompReach >= 2.0 && c.channelShare >= 1.0);
     const avgGap = withS.length ? withS.reduce((s, c) => s + c.gap, 0) / withS.length : 0;
     const avgATC = market === 'Karnataka' && withS.length ? withS.reduce((s, c) => s + ((c as any).atcIndex || 0), 0) / withS.length : null;
+
+    // Calculate primetime metrics
+    const channelsWithTimebands = enrichedChannels.filter(c => c.primetimeReach !== undefined);
+    const avgPrimetimeReach = channelsWithTimebands.length > 0
+      ? channelsWithTimebands.reduce((s, c) => s + (c.primetimeReach || 0), 0) / channelsWithTimebands.length
+      : 0;
+    const avgNonPrimetimeReach = channelsWithTimebands.length > 0
+      ? channelsWithTimebands.reduce((s, c) => s + (c.nonPrimetimeReach || 0), 0) / channelsWithTimebands.length
+      : 0;
+
     return {
-      total: rawChannels.length,
+      total: enrichedChannels.length,
       rel: rel.length,
       active: withS.length,
       opp: opp.length,
       avgGap,
       avgATC,
+      avgPrimetimeReach,
+      avgNonPrimetimeReach,
+      primeVsNonPrime: avgNonPrimetimeReach > 0 ? avgPrimetimeReach / avgNonPrimetimeReach : 0,
       status: avgGap >= 2 ? 'LEADING' : avgGap >= 0 ? 'CLOSE' : avgGap >= -2 ? 'BEHIND' : 'CRITICAL'
     };
-  }, [rawChannels, market]);
+  }, [enrichedChannels, market]);
+
+  // Calculate timeband stats for selector
+  const timebandStats = useMemo(() => {
+    const stats: Record<string, { reach: number; isPrime: boolean }> = {};
+
+    for (const timeband of TIMEBAND_LABELS) {
+      const isPrime = timeband === '17:00-20:00' || timeband === '20:00-23:00';
+      const channelsWithTimeband = enrichedChannels.filter(c => c.timebands);
+      const totalReach = channelsWithTimeband.reduce((sum, c) => {
+        const tb = c.timebands?.find(t => t.timeband === timeband);
+        return sum + (tb?.santoorReach || 0);
+      }, 0);
+      const avgReach = channelsWithTimeband.length > 0 ? totalReach / channelsWithTimeband.length : 0;
+
+      stats[timeband] = { reach: avgReach, isPrime };
+    }
+
+    return stats;
+  }, [enrichedChannels]);
 
   const optSum = useMemo(() => {
     const arr = [...results.values()];
@@ -311,7 +383,16 @@ export default function App() {
           </div>
         </div>
 
-        {/* OPTIMIZATION CONTROLS */}
+        {/* TAB NAVIGATION */}
+        <TabNavigation
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
+
+        {/* CHANNEL ANALYSIS TAB */}
+        {activeTab === 'channel' && (
+          <>
+            {/* OPTIMIZATION CONTROLS */}
         <div style={{ marginBottom: '32px' }}>
           {/* Optimization Panel */}
           <div className="panel">
@@ -455,6 +536,7 @@ export default function App() {
               </div>
             </div>
           )}
+
         </div>
 
         {/* OPTIMIZATION RESULTS */}
@@ -708,9 +790,19 @@ export default function App() {
                 {displayChannels.map((ch, i) => {
                   const st = calculateStatus(ch);
                   const opt = results.get(ch.channel);
+                  const isExpanded = expandedChannel === ch.channel;
+
                   return (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{ch.channel}</td>
+                    <>
+                      <tr
+                        key={i}
+                        style={{
+                          background: 'transparent'
+                        }}
+                      >
+                        <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                          {ch.channel}
+                        </td>
                       <td style={{ color: 'var(--text-tertiary)' }}>{ch.genre}</td>
                       <td style={{ fontWeight: 600, color: 'var(--orange-bright)', textAlign: 'right' }}>
                         {ch.santoorReach.toFixed(1)}%
@@ -759,12 +851,555 @@ export default function App() {
                         </>
                       )}
                     </tr>
+
+                    {/* No expandable rows in channel tab - moved to timeband tab */}
+                    {false && (
+                      <tr key={`${i}-expanded`}>
+                        <td colSpan={isOptimized ? (market === 'Karnataka' ? 11 : 10) : (market === 'Karnataka' ? 9 : 8)} style={{ padding: 0, background: 'var(--surface-1)' }}>
+                          <div style={{
+                            padding: '24px',
+                            borderTop: '2px solid var(--border)',
+                            borderBottom: '2px solid var(--border)'
+                          }}>
+                            <h4 style={{
+                              fontFamily: 'Outfit, sans-serif',
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              color: 'var(--text-primary)',
+                              marginBottom: '16px'
+                            }}>
+                              📊 Timeband Breakdown: {ch.channel}
+                            </h4>
+
+                            <div style={{ overflowX: 'auto' }}>
+                              <table className="data-table" style={{ fontSize: '11px' }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ fontSize: '10px' }}>TIMEBAND</th>
+                                    <th style={{ fontSize: '10px' }}>SANTOOR</th>
+                                    <th style={{ fontSize: '10px' }}>COMPETITOR</th>
+                                    <th style={{ fontSize: '10px' }}>GAP</th>
+                                    <th style={{ fontSize: '10px' }}>SHARE</th>
+                                    <th style={{ fontSize: '10px' }}>STATUS</th>
+                                    <th style={{ fontSize: '10px' }}>ACTION</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {ch.timebands.map((tb, tbIdx) => (
+                                    <tr
+                                      key={tbIdx}
+                                      style={{
+                                        background: tb.isPrimetime ? 'rgba(255, 107, 0, 0.04)' : 'transparent',
+                                        borderLeft: tb.isPrimetime ? '3px solid var(--orange-bright)' : '3px solid transparent'
+                                      }}
+                                    >
+                                      <td style={{
+                                        fontFamily: 'DM Mono, monospace',
+                                        fontWeight: 500,
+                                        color: 'var(--text-primary)'
+                                      }}>
+                                        {tb.timeband}
+                                        {tb.isPrimetime && (
+                                          <span style={{
+                                            marginLeft: '8px',
+                                            fontSize: '9px',
+                                            background: 'var(--orange-bright)',
+                                            color: 'white',
+                                            padding: '2px 6px',
+                                            borderRadius: '3px',
+                                            fontWeight: 600
+                                          }}>
+                                            PRIME
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td style={{
+                                        fontWeight: 600,
+                                        color: 'var(--orange-bright)',
+                                        textAlign: 'right'
+                                      }}>
+                                        {tb.santoorReach.toFixed(1)}%
+                                      </td>
+                                      <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                        {tb.maxCompReach.toFixed(1)}%
+                                      </td>
+                                      <td style={{
+                                        fontWeight: 600,
+                                        color: tb.gap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)',
+                                        textAlign: 'right'
+                                      }}>
+                                        {tb.gap >= 0 ? '+' : ''}{tb.gap.toFixed(1)}
+                                      </td>
+                                      <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                        {tb.santoorShare.toFixed(1)}%
+                                      </td>
+                                      <td>
+                                        <span className={STATUS_CLASSES[getTimebandStatus(tb)] || 'signal-badge signal-neutral'}>
+                                          {getTimebandStatus(tb)}
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <span className={REC_CLASSES[getTimebandRecommendation(tb)] || 'signal-badge signal-neutral'}>
+                                          {REC_ICONS[getTimebandRecommendation(tb)]} {getTimebandRecommendation(tb)}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            {/* Timeband Summary */}
+                            <div style={{
+                              marginTop: '16px',
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                              gap: '12px'
+                            }}>
+                              <div style={{
+                                padding: '12px',
+                                background: 'var(--surface-2)',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border)'
+                              }}>
+                                <div style={{
+                                  fontSize: '9px',
+                                  textTransform: 'uppercase',
+                                  color: 'var(--text-tertiary)',
+                                  marginBottom: '4px'
+                                }}>
+                                  Peak Timeband
+                                </div>
+                                <div style={{
+                                  fontFamily: 'DM Mono, monospace',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: 'var(--orange-bright)'
+                                }}>
+                                  {ch.peakTimeband || 'N/A'}
+                                </div>
+                              </div>
+
+                              <div style={{
+                                padding: '12px',
+                                background: 'var(--surface-2)',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border)'
+                              }}>
+                                <div style={{
+                                  fontSize: '9px',
+                                  textTransform: 'uppercase',
+                                  color: 'var(--text-tertiary)',
+                                  marginBottom: '4px'
+                                }}>
+                                  Primetime Reach
+                                </div>
+                                <div style={{
+                                  fontFamily: 'DM Mono, monospace',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: 'var(--signal-positive)'
+                                }}>
+                                  {(ch.primetimeReach || 0).toFixed(1)}%
+                                </div>
+                              </div>
+
+                              <div style={{
+                                padding: '12px',
+                                background: 'var(--surface-2)',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border)'
+                              }}>
+                                <div style={{
+                                  fontSize: '9px',
+                                  textTransform: 'uppercase',
+                                  color: 'var(--text-tertiary)',
+                                  marginBottom: '4px'
+                                }}>
+                                  Prime Advantage
+                                </div>
+                                <div style={{
+                                  fontFamily: 'DM Mono, monospace',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: 'var(--text-primary)'
+                                }}>
+                                  {(ch.nonPrimetimeReach && ch.nonPrimetimeReach > 0)
+                                    ? `${((ch.primetimeReach || 0) / ch.nonPrimetimeReach).toFixed(2)}x`
+                                    : 'N/A'
+                                  }
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                   );
                 })}
               </tbody>
             </table>
           </div>
         </div>
+          </>
+        )}
+
+        {/* TIMEBAND ANALYSIS TAB */}
+        {activeTab === 'timeband' && (
+          <>
+            {/* HEATMAP METRIC SELECTOR */}
+            <div className="panel" style={{ marginBottom: '16px' }}>
+              <div className="p-4" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <span style={{
+                  fontFamily: 'DM Mono, monospace',
+                  fontSize: '11px',
+                  color: 'var(--text-tertiary)',
+                  textTransform: 'uppercase',
+                  fontWeight: 600
+                }}>
+                  Heatmap Metric:
+                </span>
+                <select
+                  value={heatmapMetric}
+                  onChange={e => setHeatmapMetric(e.target.value as 'reach' | 'gap' | 'atcIndex')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  <option value="reach">Reach %</option>
+                  <option value="gap">Competitive Gap</option>
+                  {market === 'Karnataka' && <option value="atcIndex">ATC Index</option>}
+                </select>
+              </div>
+            </div>
+
+            {/* TIMEBAND HEATMAP */}
+            <div className="panel" style={{ marginBottom: '32px' }}>
+              <div className="panel-header">
+                <span style={{
+                  fontFamily: 'Outfit, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)'
+                }}>
+                  🔥 4-BAND HEATMAP - {heatmapMetric === 'reach' ? 'Reach %' : heatmapMetric === 'gap' ? 'Gap' : 'ATC Index'}
+                </span>
+              </div>
+              <div className="p-4">
+                <TimebandHeatmap
+                  channels={displayChannels}
+                  metric={heatmapMetric}
+                  maxChannels={20}
+                />
+              </div>
+            </div>
+
+            {/* TIMEBAND FILTERS */}
+            <div className="panel mb-6">
+              <div className="p-5">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  <select value={genre} onChange={e => setGenre(e.target.value)} style={{ minWidth: '150px' }}>
+                    {genres.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="SEARCH CHANNELS..."
+                    style={{ flex: 1, minWidth: '200px' }}
+                  />
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer'
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={showAll}
+                      onChange={e => setShowAll(e.target.checked)}
+                    />
+                    <span style={{
+                      fontFamily: 'DM Mono, monospace',
+                      fontSize: '12px',
+                      color: 'var(--text-secondary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em'
+                    }}>
+                      {showAll
+                        ? `SHOWING ALL CHANNELS (${displayChannels.length})`
+                        : `ACTIONABLE CHANNELS (${displayChannels.length})`
+                      }
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* CHANNEL LIST WITH TIMEBAND DETAILS */}
+            <div className="panel">
+              <div className="panel-header">
+                <span style={{
+                  fontFamily: 'Outfit, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)'
+                }}>
+                  📊 CHANNELS WITH 4-BAND BREAKDOWN
+                  {selectedTimeband !== 'all' && ` - Filtered by ${selectedTimeband}`}
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>CHANNEL</th>
+                      <th>GENRE</th>
+                      <th>SANTOOR REACH</th>
+                      <th>GAP</th>
+                      <th>PRIME REACH</th>
+                      <th>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayChannels.map((ch, i) => {
+                      const isExpanded = expandedChannel === ch.channel;
+                      return (
+                        <Fragment key={i}>
+                          <tr
+                            onClick={() => setExpandedChannel(isExpanded ? null : ch.channel)}
+                            style={{
+                              cursor: ch.timebands ? 'pointer' : 'default',
+                              background: isExpanded ? 'var(--surface-2)' : 'transparent'
+                            }}
+                          >
+                            <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {ch.timebands && (
+                                  <span style={{
+                                    fontSize: '12px',
+                                    color: 'var(--text-tertiary)',
+                                    transition: 'transform 0.2s ease',
+                                    transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'
+                                  }}>
+                                    ▶
+                                  </span>
+                                )}
+                                {ch.channel}
+                              </div>
+                            </td>
+                            <td style={{ color: 'var(--text-tertiary)' }}>{ch.genre}</td>
+                            <td style={{ fontWeight: 600, color: 'var(--orange-bright)', textAlign: 'right' }}>
+                              {ch.santoorReach.toFixed(1)}%
+                            </td>
+                            <td style={{
+                              fontWeight: 600,
+                              color: ch.gap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)',
+                              textAlign: 'right'
+                            }}>
+                              {ch.gap >= 0 ? '+' : ''}{ch.gap.toFixed(1)}
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--signal-positive)' }}>
+                              {(ch.primetimeReach || 0).toFixed(1)}%
+                            </td>
+                            <td>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedChannelForInsights(ch.channel);
+                                }}
+                                className="btn-tactical"
+                                style={{ fontSize: '10px', padding: '4px 12px' }}
+                              >
+                                View Insights
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* EXPANDED TIMEBAND DETAIL ROW */}
+                          {isExpanded && ch.timebands && (
+                            <tr>
+                              <td colSpan={6} style={{ padding: 0, background: 'var(--surface-1)' }}>
+                                <div style={{
+                                  padding: '24px',
+                                  borderTop: '2px solid var(--border)',
+                                  borderBottom: '2px solid var(--border)'
+                                }}>
+                                  <h4 style={{
+                                    fontFamily: 'Outfit, sans-serif',
+                                    fontSize: '14px',
+                                    fontWeight: 600,
+                                    color: 'var(--text-primary)',
+                                    marginBottom: '16px'
+                                  }}>
+                                    📊 4-Band Timeband Breakdown: {ch.channel}
+                                  </h4>
+
+                                  <div style={{ overflowX: 'auto' }}>
+                                    <table className="data-table" style={{ fontSize: '11px' }}>
+                                      <thead>
+                                        <tr>
+                                          <th style={{ fontSize: '10px' }}>TIMEBAND</th>
+                                          <th style={{ fontSize: '10px' }}>SANTOOR</th>
+                                          <th style={{ fontSize: '10px' }}>COMPETITOR</th>
+                                          <th style={{ fontSize: '10px' }}>GAP</th>
+                                          <th style={{ fontSize: '10px' }}>SHARE</th>
+                                          <th style={{ fontSize: '10px' }}>STATUS</th>
+                                          <th style={{ fontSize: '10px' }}>ACTION</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {ch.timebands.map((tb, tbIdx) => (
+                                          <tr
+                                            key={tbIdx}
+                                            style={{
+                                              background: tb.isPrimetime ? 'rgba(255, 107, 0, 0.04)' : 'transparent',
+                                              borderLeft: tb.isPrimetime ? '3px solid var(--orange-bright)' : '3px solid transparent'
+                                            }}
+                                          >
+                                            <td style={{
+                                              fontFamily: 'DM Mono, monospace',
+                                              fontWeight: 500,
+                                              color: 'var(--text-primary)'
+                                            }}>
+                                              {tb.timeband}
+                                              {tb.isPrimetime && (
+                                                <span style={{
+                                                  marginLeft: '8px',
+                                                  fontSize: '9px',
+                                                  background: 'var(--orange-bright)',
+                                                  color: 'white',
+                                                  padding: '2px 6px',
+                                                  borderRadius: '3px',
+                                                  fontWeight: 600
+                                                }}>
+                                                  PRIME
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td style={{
+                                              fontWeight: 600,
+                                              color: 'var(--orange-bright)',
+                                              textAlign: 'right'
+                                            }}>
+                                              {tb.santoorReach.toFixed(1)}%
+                                            </td>
+                                            <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                              {tb.maxCompReach.toFixed(1)}%
+                                            </td>
+                                            <td style={{
+                                              fontWeight: 600,
+                                              color: tb.gap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)',
+                                              textAlign: 'right'
+                                            }}>
+                                              {tb.gap >= 0 ? '+' : ''}{tb.gap.toFixed(1)}
+                                            </td>
+                                            <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                              {tb.santoorShare.toFixed(1)}%
+                                            </td>
+                                            <td>
+                                              <span className={STATUS_CLASSES[getTimebandStatus(tb)] || 'signal-badge signal-neutral'}>
+                                                {getTimebandStatus(tb)}
+                                              </span>
+                                            </td>
+                                            <td>
+                                              <span className={REC_CLASSES[getTimebandRecommendation(tb)] || 'signal-badge signal-neutral'}>
+                                                {REC_ICONS[getTimebandRecommendation(tb)]} {getTimebandRecommendation(tb)}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* INSIGHTS MODAL */}
+            {selectedChannelForInsights && (() => {
+              const channel = displayChannels.find(ch => ch.channel === selectedChannelForInsights);
+              if (channel && channel.timebands) {
+                const insights = generateSimplifiedInsights(channel, market, enrichedChannels);
+                return (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background: 'rgba(0, 0, 0, 0.75)',
+                      backdropFilter: 'blur(4px)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 1000,
+                      padding: '20px'
+                    }}
+                    onClick={() => setSelectedChannelForInsights(null)}
+                  >
+                    <div
+                      style={{
+                        maxWidth: '900px',
+                        width: '100%',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        position: 'relative'
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Close button */}
+                      <button
+                        onClick={() => setSelectedChannelForInsights(null)}
+                        style={{
+                          position: 'absolute',
+                          top: '16px',
+                          right: '16px',
+                          background: 'var(--surface-3)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '6px',
+                          padding: '8px 16px',
+                          fontFamily: 'DM Mono, monospace',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          zIndex: 10,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'var(--signal-negative)';
+                          e.currentTarget.style.color = 'white';
+                          e.currentTarget.style.borderColor = 'var(--signal-negative)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'var(--surface-3)';
+                          e.currentTarget.style.color = 'var(--text-secondary)';
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                        }}
+                      >
+                        ✕ Close
+                      </button>
+
+                      <PlannerInsightsSummary insights={insights} channelName={channel.channel} />
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+          </>
+        )}
 
         {/* FOOTER */}
         <div style={{

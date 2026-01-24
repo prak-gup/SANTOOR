@@ -15,7 +15,7 @@ import TabNavigation from './components/TabNavigation';
 import TimebandSelector from './components/TimebandSelector';
 import TimebandHeatmap from './components/TimebandHeatmap';
 import PlannerInsightsSummary from './components/PlannerInsightsSummary';
-import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_LABELS } from './utils/timebandProcessor';
+import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_LABELS, TIMEBAND_DISPLAY_V2 } from './utils/timebandProcessor';
 import { getTimebandStatus, getTimebandRecommendation } from './utils/timebandAnalysis';
 import { generateSimplifiedInsights } from './utils/plannerInsights';
 
@@ -898,7 +898,7 @@ export default function App() {
                                         fontWeight: 500,
                                         color: 'var(--text-primary)'
                                       }}>
-                                        {tb.timeband}
+                                        {TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband}
                                         {tb.isPrimetime && (
                                           <span style={{
                                             marginLeft: '8px',
@@ -1261,7 +1261,7 @@ export default function App() {
                                               fontWeight: 500,
                                               color: 'var(--text-primary)'
                                             }}>
-                                              {tb.timeband}
+                                              {TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband}
                                               {tb.isPrimetime && (
                                                 <span style={{
                                                   marginLeft: '8px',

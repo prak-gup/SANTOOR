@@ -131,6 +131,13 @@ function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
   );
 }
 
+// Market display names
+const MARKET_DISPLAY_NAMES: Record<MarketName, string> = {
+  'UP': 'UP',
+  'Maharashtra': 'Rest of Maharashtra',
+  'Karnataka': 'Karnataka'
+};
+
 export default function App() {
   // Tab navigation state
   const [activeTab, setActiveTab] = useState<'channel' | 'timeband'>('channel');
@@ -364,7 +371,7 @@ export default function App() {
                   onChange={e => setMarket(e.target.value as MarketName)}
                   style={{ minWidth: '180px' }}
                 >
-                  {santoorData.metadata.markets.map(m => <option key={m} value={m}>{m}</option>)}
+                  {santoorData.metadata.markets.map(m => <option key={m} value={m}>{MARKET_DISPLAY_NAMES[m as MarketName]}</option>)}
                 </select>
               </div>
 

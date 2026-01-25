@@ -4,7 +4,7 @@ export interface TimebandMetrics {
   santoorReach: number;          // Reach % for Santoor in this timeband
   santoorShare: number;          // Share % for Santoor
   santoorOTS: number;            // Opportunity to See
-  godrejReach?: number;          // Competitor reach (UP/Maharashtra)
+  godrejReach?: number;          // Competitor reach (UP/Rest of Maharashtra)
   luxReach?: number;
   lifebuoyReach?: number;        // Karnataka
   mysore_sandalReach?: number;
@@ -147,8 +147,8 @@ export interface ChannelRecord {
   indexVsCompetition: number;
 
   // Market-specific competitor reaches
-  godrejReach?: number;      // UP/Maharashtra
-  luxReach?: number;         // UP/Maharashtra
+  godrejReach?: number;      // UP/Rest of Maharashtra
+  luxReach?: number;         // UP/Rest of Maharashtra
   lifebuoyReach?: number;    // Karnataka
   mysore_sandalReach?: number; // Karnataka
 

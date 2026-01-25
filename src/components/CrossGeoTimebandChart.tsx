@@ -104,6 +104,10 @@ export const CrossGeoTimebandChart: React.FC<CrossGeoTimebandChartProps> = ({
               fontSize: '11px',
               fontFamily: 'DM Mono, monospace'
             }}
+            formatter={(value: string) => {
+              if (value === 'Maharashtra') return 'Rest of Maharashtra';
+              return value;
+            }}
           />
 
           <Line

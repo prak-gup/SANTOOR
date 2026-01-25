@@ -138,12 +138,28 @@ const MARKET_DISPLAY_NAMES: Record<MarketName, string> = {
   'Karnataka': 'Karnataka'
 };
 
+// Reverse mapping: display name -> internal market value
+const DISPLAY_TO_MARKET: Record<string, MarketName> = {
+  'UP': 'UP',
+  'Rest of Maharashtra': 'Maharashtra',
+  'Karnataka': 'Karnataka'
+};
+
 export default function App() {
   // Tab navigation state
   const [activeTab, setActiveTab] = useState<'channel' | 'timeband'>('channel');
 
-  // Core state
-  const [market, setMarket] = useState<MarketName>('Maharashtra');
+  // Core state - initialize from URL if available
+  const getInitialMarket = (): MarketName => {
+    const params = new URLSearchParams(window.location.search);
+    const marketFromUrl = params.get('market');
+    if (marketFromUrl) {
+      const decoded = decodeURIComponent(marketFromUrl);
+      return DISPLAY_TO_MARKET[decoded] || 'Maharashtra';
+    }
+    return 'Maharashtra';
+  };
+  const [market, setMarket] = useState<MarketName>(getInitialMarket());
   const [scr, setSCR] = useState<string>('Maharashtra Overall');
   const [intensity, setIntensity] = useState<number>(15);
   const [threshold, setThreshold] = useState<number>(70);
@@ -181,6 +197,15 @@ export default function App() {
       return enrichChannelWithTimebands(channel, sampleTimebands);
     });
   }, [rawChannels, market]);
+
+  // Update URL when market changes
+  useEffect(() => {
+    const displayName = MARKET_DISPLAY_NAMES[market];
+    const params = new URLSearchParams(window.location.search);
+    params.set('market', encodeURIComponent(displayName));
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.pushState({}, '', newUrl);
+  }, [market]);
 
   useEffect(() => { setIsOptimized(false); setResults(new Map()); }, [market, scr]);
   useEffect(() => {

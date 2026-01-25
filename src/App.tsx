@@ -17,6 +17,7 @@ import PlannerInsightsSummary from './components/PlannerInsightsSummary';
 import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_DISPLAY_V2 } from './utils/timebandProcessor';
 import { getTimebandStatus, getTimebandRecommendation } from './utils/timebandAnalysis';
 import { generateSimplifiedInsights } from './utils/plannerInsights';
+import { filterChannelsForMarket } from './utils/channelLanguageFilter';
 
 type MarketName = string;
 
@@ -182,7 +183,10 @@ export default function App() {
   const scrs = marketData?.scrs || [];
   const competitors = marketData?.competitors || [];
   const optType = marketData?.optimizationType || 'Reach';
-  const rawChannels: ChannelRecord[] = marketData?.channelData[scr] || [];
+  const rawChannels: ChannelRecord[] = filterChannelsForMarket(
+    marketData?.channelData[scr] || [],
+    market as 'UP' | 'Maharashtra' | 'Karnataka'
+  );
 
   // Enrich channels with timeband data (using sample data for now)
   const enrichedChannels = useMemo(() => {
@@ -929,19 +933,6 @@ export default function App() {
                                         color: 'var(--text-primary)'
                                       }}>
                                         {TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband}
-                                        {tb.isPrimetime && (
-                                          <span style={{
-                                            marginLeft: '8px',
-                                            fontSize: '9px',
-                                            background: 'var(--orange-bright)',
-                                            color: 'white',
-                                            padding: '2px 6px',
-                                            borderRadius: '3px',
-                                            fontWeight: 600
-                                          }}>
-                                            PRIME
-                                          </span>
-                                        )}
                                       </td>
                                       <td style={{
                                         fontWeight: 600,
@@ -1296,19 +1287,6 @@ export default function App() {
                                               color: 'var(--text-primary)'
                                             }}>
                                               {TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband}
-                                              {tb.isPrimetime && (
-                                                <span style={{
-                                                  marginLeft: '8px',
-                                                  fontSize: '9px',
-                                                  background: 'var(--orange-bright)',
-                                                  color: 'white',
-                                                  padding: '2px 6px',
-                                                  borderRadius: '3px',
-                                                  fontWeight: 600
-                                                }}>
-                                                  PRIME
-                                                </span>
-                                              )}
                                             </td>
                                             <td style={{
                                               fontWeight: 600,

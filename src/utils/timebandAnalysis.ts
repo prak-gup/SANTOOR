@@ -70,7 +70,7 @@ export interface TimebandGapAnalysis {
 }
 
 export function calculateTimebandGapAnalysis(
-  channel: string,
+  _channel: string,
   timebands: TimebandMetrics[]
 ): TimebandGapAnalysis[] {
   return timebands.map(tb => ({

@@ -10,12 +10,11 @@ import {
   calculateStatus,
   runOptimization,
 } from './utils/optimization';
-import type { ChannelRecord } from './utils/optimization';
+import type { ChannelRecord, TimebandMetrics } from './types';
 import TabNavigation from './components/TabNavigation';
-import TimebandSelector from './components/TimebandSelector';
 import TimebandHeatmap from './components/TimebandHeatmap';
 import PlannerInsightsSummary from './components/PlannerInsightsSummary';
-import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_LABELS, TIMEBAND_DISPLAY_V2 } from './utils/timebandProcessor';
+import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_DISPLAY_V2 } from './utils/timebandProcessor';
 import { getTimebandStatus, getTimebandRecommendation } from './utils/timebandAnalysis';
 import { generateSimplifiedInsights } from './utils/plannerInsights';
 
@@ -174,7 +173,7 @@ export default function App() {
   const prevOptimizedRef = useRef(false);
 
   // Timeband state (only for timeband tab)
-  const [selectedTimeband, setSelectedTimeband] = useState<string>('all');
+  const [selectedTimeband, _setSelectedTimeband] = useState<string>('all');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [heatmapMetric, setHeatmapMetric] = useState<'reach' | 'gap' | 'atcIndex'>('reach');
   const [selectedChannelForInsights, setSelectedChannelForInsights] = useState<string | null>(null);
@@ -217,7 +216,7 @@ export default function App() {
   const genres = useMemo(() => ['All', ...new Set(enrichedChannels.map(c => c.genre))], [enrichedChannels]);
 
   const displayChannels = useMemo(() => {
-    let filtered = showAll ? enrichedChannels : filterRelevantChannels(enrichedChannels, 'actionable');
+    let filtered: ChannelRecord[] = showAll ? enrichedChannels : filterRelevantChannels(enrichedChannels, 'actionable') as ChannelRecord[];
     if (genre !== 'All') filtered = filtered.filter(c => c.genre === genre);
     if (search) filtered = filtered.filter(c => c.channel.toLowerCase().includes(search.toLowerCase()));
 
@@ -225,7 +224,7 @@ export default function App() {
     if (activeTab === 'timeband' && selectedTimeband !== 'all') {
       filtered = filtered.filter(ch => {
         if (!ch.timebands) return false;
-        const tb = ch.timebands.find(t => t.timeband === selectedTimeband);
+        const tb = ch.timebands.find((t: TimebandMetrics) => t.timeband === selectedTimeband);
         return tb && tb.santoorReach > 0;
       });
     }
@@ -292,24 +291,24 @@ export default function App() {
     };
   }, [enrichedChannels, market]);
 
-  // Calculate timeband stats for selector
-  const timebandStats = useMemo(() => {
-    const stats: Record<string, { reach: number; isPrime: boolean }> = {};
-
-    for (const timeband of TIMEBAND_LABELS) {
-      const isPrime = timeband === '17:00-20:00' || timeband === '20:00-23:00';
-      const channelsWithTimeband = enrichedChannels.filter(c => c.timebands);
-      const totalReach = channelsWithTimeband.reduce((sum, c) => {
-        const tb = c.timebands?.find(t => t.timeband === timeband);
-        return sum + (tb?.santoorReach || 0);
-      }, 0);
-      const avgReach = channelsWithTimeband.length > 0 ? totalReach / channelsWithTimeband.length : 0;
-
-      stats[timeband] = { reach: avgReach, isPrime };
-    }
-
-    return stats;
-  }, [enrichedChannels]);
+  // Calculate timeband stats for selector (currently unused but kept for future use)
+  // const timebandStats = useMemo(() => {
+  //   const stats: Record<string, { reach: number; isPrime: boolean }> = {};
+  //
+  //   for (const timeband of TIMEBAND_LABELS) {
+  //     const isPrime = timeband === '17:00-20:00' || timeband === '20:00-23:00';
+  //     const channelsWithTimeband = enrichedChannels.filter(c => c.timebands);
+  //     const totalReach = channelsWithTimeband.reduce((sum, c) => {
+  //       const tb = c.timebands?.find((t: TimebandMetrics) => t.timeband === timeband);
+  //       return sum + (tb?.santoorReach || 0);
+  //     }, 0);
+  //     const avgReach = channelsWithTimeband.length > 0 ? totalReach / channelsWithTimeband.length : 0;
+  //
+  //     stats[timeband] = { reach: avgReach, isPrime };
+  //   }
+  //
+  //   return stats;
+  // }, [enrichedChannels]);
 
   const optSum = useMemo(() => {
     const arr = [...results.values()];
@@ -822,7 +821,6 @@ export default function App() {
                 {displayChannels.map((ch, i) => {
                   const st = calculateStatus(ch);
                   const opt = results.get(ch.channel);
-                  const isExpanded = expandedChannel === ch.channel;
 
                   return (
                     <>
@@ -917,7 +915,7 @@ export default function App() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {ch.timebands.map((tb, tbIdx) => (
+                                  {ch.timebands?.map((tb: TimebandMetrics, tbIdx: number) => (
                                     <tr
                                       key={tbIdx}
                                       style={{
@@ -1056,10 +1054,14 @@ export default function App() {
                                   fontWeight: 600,
                                   color: 'var(--text-primary)'
                                 }}>
-                                  {(ch.nonPrimetimeReach && ch.nonPrimetimeReach > 0)
-                                    ? `${((ch.primetimeReach || 0) / ch.nonPrimetimeReach).toFixed(2)}x`
-                                    : 'N/A'
-                                  }
+                                  {(() => {
+                                    const primeReach = ch.primetimeReach ?? 0;
+                                    const nonPrimeReach = ch.nonPrimetimeReach ?? 0;
+                                    if (nonPrimeReach > 0) {
+                                      return `${(primeReach / nonPrimeReach).toFixed(2)}x`;
+                                    }
+                                    return 'N/A';
+                                  })()}
                                 </div>
                               </div>
                             </div>
@@ -1280,7 +1282,7 @@ export default function App() {
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {ch.timebands.map((tb, tbIdx) => (
+                                        {ch.timebands.map((tb: TimebandMetrics, tbIdx: number) => (
                                           <tr
                                             key={tbIdx}
                                             style={{

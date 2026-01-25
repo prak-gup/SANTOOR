@@ -27,7 +27,7 @@ const COMPETITOR_COLORS: Record<string, string> = {
 
 export const TimebandPerformanceChart: React.FC<TimebandPerformanceChartProps> = ({
   channel,
-  competitors,
+  competitors: _competitors,
   market
 }) => {
   if (!channel.timebands || channel.timebands.length === 0) {
@@ -101,7 +101,7 @@ export const TimebandPerformanceChart: React.FC<TimebandPerformanceChartProps> =
               fontSize: '11px',
               fontFamily: 'DM Mono, monospace'
             }}
-            formatter={(value: number) => `${value.toFixed(2)}%`}
+            formatter={(value: number | undefined) => value !== undefined ? `${value.toFixed(2)}%` : ''}
           />
           <Legend
             wrapperStyle={{

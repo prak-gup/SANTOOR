@@ -442,7 +442,7 @@ function benchmarkAgainstMarket(
  */
 function generatePrioritizedActions(
   timebands: TimebandMetrics[],
-  market: string
+  _market: string
 ) {
   const actions: Array<{
     priority: 'HIGH' | 'MEDIUM' | 'LOW';

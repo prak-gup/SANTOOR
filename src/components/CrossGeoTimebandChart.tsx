@@ -97,7 +97,7 @@ export const CrossGeoTimebandChart: React.FC<CrossGeoTimebandChartProps> = ({
               fontSize: '11px',
               fontFamily: 'DM Mono, monospace'
             }}
-            formatter={(value: number) => `${value.toFixed(2)}%`}
+            formatter={(value: number | undefined) => value !== undefined ? `${value.toFixed(2)}%` : ''}
           />
           <Legend
             wrapperStyle={{

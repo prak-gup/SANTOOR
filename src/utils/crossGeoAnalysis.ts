@@ -2,7 +2,7 @@
 // CROSS-GEOGRAPHY TIMEBAND ANALYSIS UTILITIES
 // ============================================================
 
-import type { CrossGeoTimebandComparison, ChannelRecord, TimebandMetrics } from '../types';
+import type { CrossGeoTimebandComparison, ChannelRecord } from '../types';
 
 /**
  * Get timeband reach for a specific channel and timeband in a market

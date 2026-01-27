@@ -20,6 +20,8 @@ import { generateSimplifiedInsights } from './utils/plannerInsights';
 import { filterChannelsForMarket } from './utils/channelLanguageFilter';
 import { useTheme } from './hooks/useTheme';
 import ThemeToggle from './components/ThemeToggle';
+import wppLogo from './assets/wpp-logo.svg';
+import syncLogo from './assets/sync-logo.svg';
 
 type MarketName = string;
 
@@ -421,19 +423,23 @@ export default function App() {
               </p>
             </div>
 
-            {/* Right: Theme Toggle */}
-            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            {/* Right: Logos and Theme Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+              {/* Company Logos */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <img src={wppLogo} alt="WPP" style={{ height: '40px' }} />
+                <span style={{
+                  fontSize: '24px',
+                  color: 'var(--text-tertiary)',
+                  fontWeight: 300,
+                  userSelect: 'none'
+                }}>+</span>
+                <img src={syncLogo} alt="SYNC" style={{ height: '40px' }} />
+              </div>
 
-            {/* Right: Logos (commented out) */}
-            {/* TODO: Add logo files to src/assets/ folder:
-                - wpp-logo.svg (or .png)
-                - sync-logo.svg (or .png)
-                Then uncomment the logo section below */}
-            {/* <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <img src="/src/assets/wpp-logo.svg" alt="WPP" style={{ height: '40px' }} />
-              <span style={{ fontSize: '24px', color: 'var(--text-tertiary)' }}>+</span>
-              <img src="/src/assets/sync-logo.svg" alt="SYNC" style={{ height: '40px' }} />
-            </div> */}
+              {/* Theme Toggle */}
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            </div>
           </div>
         </div>
 

@@ -200,6 +200,18 @@ div[style*="position: absolute"][style*="minWidth: 320px"] {
     gap: 16px;
   }
 
+  /* Logo and theme toggle container */
+  .panel > div > div[style*="gap: 24px"] {
+    width: 100%;
+    justify-content: space-between !important;
+  }
+
+  /* Scale down logos on tablet */
+  .panel img[alt="WPP"],
+  .panel img[alt="SYNC"] {
+    height: 32px !important;
+  }
+
   /* Make metric cards stack better */
   .metric-card {
     padding: 16px;
@@ -313,6 +325,26 @@ div[style*="position: absolute"][style*="minWidth: 320px"] {
   button[title*="Switch to"] {
     width: 40px !important;
     height: 40px !important;
+  }
+
+  /* Scale down logos on mobile */
+  .panel img[alt="WPP"],
+  .panel img[alt="SYNC"] {
+    height: 28px !important;
+  }
+
+  /* Reduce spacing in logo container */
+  .panel > div > div[style*="gap: 24px"] {
+    gap: 16px !important;
+  }
+
+  .panel > div > div > div[style*="gap: 16px"] {
+    gap: 12px !important;
+  }
+
+  /* Smaller separator */
+  .panel > div > div > div > span[style*="fontSize: 24px"] {
+    font-size: 20px !important;
   }
 
   /* Data table improvements */

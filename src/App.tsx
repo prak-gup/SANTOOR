@@ -67,9 +67,29 @@ interface InfoButtonProps {
   isActive: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  position?: 'left' | 'right' | 'auto'; // Position of tooltip
 }
 
-function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
+function InfoButton({ isActive, onClick, children, position = 'auto' }: InfoButtonProps) {
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<'left' | 'right'>('left');
+
+  useEffect(() => {
+    if (isActive && position === 'auto' && tooltipRef.current) {
+      const rect = tooltipRef.current.getBoundingClientRect();
+      const windowWidth = window.innerWidth;
+
+      // Check if tooltip would go off-screen on the right
+      if (rect.right > windowWidth - 20) {
+        setTooltipPosition('right');
+      } else {
+        setTooltipPosition('left');
+      }
+    } else if (position !== 'auto') {
+      setTooltipPosition(position);
+    }
+  }, [isActive, position]);
+
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
@@ -108,25 +128,28 @@ function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
         i
       </button>
       {isActive && (
-        <div style={{
-          position: 'absolute',
-          top: '24px',
-          left: '0',
-          zIndex: 1000,
-          background: 'var(--surface-1)',
-          border: '2px solid var(--orange-bright)',
-          borderRadius: '8px',
-          padding: '16px',
-          minWidth: '320px',
-          maxWidth: '420px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
-          fontSize: '11px',
-          lineHeight: '1.5',
-          overflowWrap: 'break-word',
-          wordWrap: 'break-word',
-          wordBreak: 'normal',
-          color: 'var(--text-primary)'
-        }}>
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'absolute',
+            top: '24px',
+            ...(tooltipPosition === 'right' ? { right: '0' } : { left: '0' }),
+            zIndex: 1000,
+            background: 'var(--surface-1)',
+            border: '2px solid var(--orange-bright)',
+            borderRadius: '8px',
+            padding: '16px',
+            minWidth: '320px',
+            maxWidth: '420px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+            fontSize: '11px',
+            lineHeight: '1.5',
+            overflowWrap: 'break-word',
+            wordWrap: 'break-word',
+            wordBreak: 'normal',
+            color: 'var(--text-primary)'
+          }}
+        >
           {children}
         </div>
       )}

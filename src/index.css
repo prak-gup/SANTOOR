@@ -154,6 +154,30 @@
 }
 
 /* ============================================
+   TOOLTIP POSITIONING FIXES
+   ============================================ */
+
+/* Ensure tooltips never overflow viewport */
+div[style*="position: absolute"][style*="minWidth: 320px"] {
+  max-width: min(420px, calc(100vw - 40px));
+}
+
+/* For table header tooltips on desktop */
+@media (min-width: 769px) {
+  .data-table th div[style*="position: absolute"][style*="minWidth: 320px"] {
+    /* Tooltips in right columns should open to the left */
+    left: auto;
+    right: 0;
+  }
+
+  /* First few columns can open to the right */
+  .data-table th:nth-child(-n+3) div[style*="position: absolute"][style*="minWidth: 320px"] {
+    left: 0;
+    right: auto;
+  }
+}
+
+/* ============================================
    MOBILE RESPONSIVE STYLES
    ============================================ */
 
@@ -312,6 +336,13 @@
     transform: translateX(-50%) !important;
     min-width: 280px !important;
     max-width: calc(100vw - 32px) !important;
+  }
+
+  /* Prevent tooltips from overflowing on right */
+  .data-table div[style*="position: absolute"][style*="minWidth: 320px"] {
+    left: auto !important;
+    right: 0 !important;
+    transform: none !important;
   }
 }
 

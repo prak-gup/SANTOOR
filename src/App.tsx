@@ -265,6 +265,19 @@ export default function App() {
     }
   }, [activeTooltip]);
 
+  // Calculate propensity metrics for Karnataka market
+  const propensityMetrics = useMemo(() => {
+    if (market !== 'Karnataka') return null;
+
+    const channelsWithATC = enrichedChannels.filter(c => (c as any).atcIndex && c.santoorReach > 0);
+    if (channelsWithATC.length === 0) return null;
+
+    const maxAtcIndex = Math.max(...channelsWithATC.map(c => (c as any).atcIndex || 0));
+    const totalWeightedATC = channelsWithATC.reduce((sum, c) => sum + ((c as any).atcIndex || 0) * c.santoorReach, 0);
+
+    return { maxAtcIndex, totalWeightedATC };
+  }, [enrichedChannels, market]);
+
   const summary = useMemo(() => {
     const rel = filterRelevantChannels(enrichedChannels);
     const withS = rel.filter(c => c.santoorReach > 0);
@@ -351,11 +364,13 @@ export default function App() {
 
         {/* HEADER - Command Center Style */}
         <div className="panel" style={{ marginBottom: '48px' }}>
-          <div className="p-8 relative">
+          <div className="p-8 relative" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div className="absolute top-0 left-0 w-1 h-full" style={{
               background: 'linear-gradient(180deg, var(--orange-bright), var(--orange-dim))',
               boxShadow: 'var(--glow-orange)'
             }}></div>
+
+            {/* Left: Title */}
             <div className="pl-6">
               <h1 style={{
                 fontFamily: 'Outfit, sans-serif',
@@ -376,6 +391,17 @@ export default function App() {
                 MULTI-MARKET CAMPAIGN ANALYSIS & OPTIMIZATION PLATFORM
               </p>
             </div>
+
+            {/* Right: Logos */}
+            {/* TODO: Add logo files to src/assets/ folder:
+                - wpp-logo.svg (or .png)
+                - sync-logo.svg (or .png)
+                Then uncomment the logo section below */}
+            {/* <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <img src="/src/assets/wpp-logo.svg" alt="WPP" style={{ height: '40px' }} />
+              <span style={{ fontSize: '24px', color: 'var(--text-tertiary)' }}>+</span>
+              <img src="/src/assets/sync-logo.svg" alt="SYNC" style={{ height: '40px' }} />
+            </div> */}
           </div>
         </div>
 
@@ -456,10 +482,29 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.08em',
                     color: 'var(--text-tertiary)',
-                    display: 'block',
+                    display: 'flex',
+                    alignItems: 'center',
                     marginBottom: '8px'
                   }}>
                     INTENSITY: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{intensity}%</span>
+                    <InfoButton
+                      isActive={activeTooltip === 'intensity'}
+                      onClick={() => setActiveTooltip(activeTooltip === 'intensity' ? null : 'intensity')}
+                    >
+                      <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
+                        <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                          ⚡ OPTIMIZATION INTENSITY
+                        </div>
+                        <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
+                          Controls how aggressively the optimizer suggests changes to your channel mix.
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                          <div style={{ marginBottom: '4px' }}>• <strong>Lower (5-10%)</strong>: Conservative, minimal changes</div>
+                          <div style={{ marginBottom: '4px' }}>• <strong>Medium (10-20%)</strong>: Balanced reallocation</div>
+                          <div>• <strong>Higher (20-30%)</strong>: Aggressive optimization</div>
+                        </div>
+                      </div>
+                    </InfoButton>
                   </label>
                   <input
                     type="range"
@@ -472,7 +517,8 @@ export default function App() {
                   <div style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginTop: '8px',
+                    marginTop: '12px',
+                    padding: '0 2px',
                     fontSize: '10px',
                     color: 'var(--text-dim)',
                     textTransform: 'uppercase',
@@ -493,10 +539,29 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.08em',
                     color: 'var(--text-tertiary)',
-                    display: 'block',
+                    display: 'flex',
+                    alignItems: 'center',
                     marginBottom: '8px'
                   }}>
                     THRESHOLD: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{threshold}%</span>
+                    <InfoButton
+                      isActive={activeTooltip === 'threshold'}
+                      onClick={() => setActiveTooltip(activeTooltip === 'threshold' ? null : 'threshold')}
+                    >
+                      <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
+                        <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                          🎯 OPTIMIZATION THRESHOLD
+                        </div>
+                        <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
+                          Sets the minimum index threshold for generating recommendations.
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                          <div style={{ marginBottom: '4px' }}>• <strong>Lower (50-60%)</strong>: More comprehensive, includes weaker channels</div>
+                          <div style={{ marginBottom: '4px' }}>• <strong>Medium (65-75%)</strong>: Balanced approach</div>
+                          <div>• <strong>Higher (80-90%)</strong>: Selective, only top-performing channels</div>
+                        </div>
+                      </div>
+                    </InfoButton>
                   </label>
                   <input
                     type="range"
@@ -510,7 +575,8 @@ export default function App() {
                   <div style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    marginTop: '8px',
+                    marginTop: '12px',
+                    padding: '0 2px',
                     fontSize: '10px',
                     color: 'var(--text-dim)',
                     textTransform: 'uppercase',
@@ -678,7 +744,10 @@ export default function App() {
                     { key: 'santoorReach', label: 'SANTOOR' },
                     { key: 'comp1', label: competitors[0]?.toUpperCase() || 'COMP 1' },
                     { key: 'comp2', label: competitors[1]?.toUpperCase().replace('_', ' ') || 'COMP 2' },
-                    ...(market === 'Karnataka' ? [{ key: 'atcIndex', label: 'ATC' }] : []),
+                    ...(market === 'Karnataka' ? [
+                      { key: 'propensity', label: 'PROPENSITY %' },
+                      { key: 'atcContribution', label: 'ATC CONTRIB %' }
+                    ] : []),
                     { key: 'gap', label: 'GAP' },
                     { key: 'indexVsCompetition', label: 'INDEX' },
                     { key: 'status', label: 'STATUS' },
@@ -774,6 +843,44 @@ export default function App() {
                             </div>
                           </InfoButton>
                         )}
+                        {col.key === 'propensity' && (
+                          <InfoButton
+                            isActive={activeTooltip === 'propensity'}
+                            onClick={() => setActiveTooltip(activeTooltip === 'propensity' ? null : 'propensity')}
+                          >
+                            <div style={{ fontFamily: 'DM Mono, monospace', width: '100%' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                                🎯 PROPENSITY SCORE
+                              </div>
+                              <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5', color: 'var(--text-primary)' }}>
+                                Likelihood of ATC conversion relative to reach, normalized 0-100%
+                              </div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                                <div style={{ marginBottom: '4px' }}>• <strong>&gt;70%</strong>: High propensity - efficient ATC driver</div>
+                                <div style={{ marginBottom: '4px' }}>• <strong>40-70%</strong>: Medium propensity</div>
+                                <div>• <strong>&lt;40%</strong>: Low propensity - reach without conversion</div>
+                              </div>
+                            </div>
+                          </InfoButton>
+                        )}
+                        {col.key === 'atcContribution' && (
+                          <InfoButton
+                            isActive={activeTooltip === 'atcContribution'}
+                            onClick={() => setActiveTooltip(activeTooltip === 'atcContribution' ? null : 'atcContribution')}
+                          >
+                            <div style={{ fontFamily: 'DM Mono, monospace', width: '100%' }}>
+                              <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
+                                📊 ATC CONTRIBUTION
+                              </div>
+                              <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5', color: 'var(--text-primary)' }}>
+                                This channel's share of total ATC impact across all channels
+                              </div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                                Formula: (Channel ATC × Reach) / Total Weighted ATC × 100
+                              </div>
+                            </div>
+                          </InfoButton>
+                        )}
                         {col.key === 'rec' && (
                           <InfoButton
                             isActive={activeTooltip === 'action'}
@@ -844,9 +951,31 @@ export default function App() {
                       <td style={{ textAlign: 'right' }}>{getComp(ch, 0).toFixed(1)}%</td>
                       <td style={{ textAlign: 'right' }}>{getComp(ch, 1).toFixed(1)}%</td>
                       {market === 'Karnataka' && (
-                        <td style={{ color: 'var(--signal-purple)', fontWeight: 500, textAlign: 'right' }}>
-                          {(ch as any).atcIndex?.toFixed(1) || '-'}
-                        </td>
+                        <>
+                          <td style={{ textAlign: 'right' }}>
+                            {(() => {
+                              if (!propensityMetrics || !(ch as any).atcIndex) return '-';
+                              const propensity = Math.min(100, ((ch as any).atcIndex / propensityMetrics.maxAtcIndex) * 100);
+                              const color = propensity >= 70 ? 'var(--signal-positive)' : propensity >= 40 ? 'var(--signal-warning)' : 'var(--signal-negative)';
+                              return (
+                                <span style={{ color, fontWeight: 600 }}>
+                                  {propensity.toFixed(1)}%
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {(() => {
+                              if (!propensityMetrics || !(ch as any).atcIndex || ch.santoorReach === 0) return '-';
+                              const contribution = ((ch as any).atcIndex * ch.santoorReach) / propensityMetrics.totalWeightedATC * 100;
+                              return (
+                                <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                                  {contribution.toFixed(1)}%
+                                </span>
+                              );
+                            })()}
+                          </td>
+                        </>
                       )}
                       <td style={{
                         fontWeight: 600,
@@ -889,7 +1018,7 @@ export default function App() {
                     {/* No expandable rows in channel tab - moved to timeband tab */}
                     {false && (
                       <tr key={`${i}-expanded`}>
-                        <td colSpan={isOptimized ? (market === 'Karnataka' ? 11 : 10) : (market === 'Karnataka' ? 9 : 8)} style={{ padding: 0, background: 'var(--surface-1)' }}>
+                        <td colSpan={isOptimized ? (market === 'Karnataka' ? 13 : 10) : (market === 'Karnataka' ? 11 : 8)} style={{ padding: 0, background: 'var(--surface-1)' }}>
                           <div style={{
                             padding: '24px',
                             borderTop: '2px solid var(--border)',
@@ -1181,7 +1310,6 @@ export default function App() {
                       <th>GENRE</th>
                       <th>SANTOOR REACH</th>
                       <th>GAP</th>
-                      <th>PRIME REACH</th>
                       <th>ACTIONS</th>
                     </tr>
                   </thead>
@@ -1223,9 +1351,6 @@ export default function App() {
                             }}>
                               {ch.gap >= 0 ? '+' : ''}{ch.gap.toFixed(1)}
                             </td>
-                            <td style={{ textAlign: 'right', color: 'var(--signal-positive)' }}>
-                              {(ch.primetimeReach || 0).toFixed(1)}%
-                            </td>
                             <td>
                               <button
                                 onClick={(e) => {
@@ -1243,7 +1368,7 @@ export default function App() {
                           {/* EXPANDED TIMEBAND DETAIL ROW */}
                           {isExpanded && ch.timebands && (
                             <tr>
-                              <td colSpan={6} style={{ padding: 0, background: 'var(--surface-1)' }}>
+                              <td colSpan={5} style={{ padding: 0, background: 'var(--surface-1)' }}>
                                 <div style={{
                                   padding: '24px',
                                   borderTop: '2px solid var(--border)',

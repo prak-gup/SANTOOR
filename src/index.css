@@ -77,6 +77,7 @@
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
                 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-bottom: 32px; /* Increased from 24px for better breathing room */
   }
 
   .panel:hover {
@@ -88,7 +89,7 @@
   .panel-header {
     background: var(--surface-2);
     border-bottom: 1px solid var(--border-medium);
-    padding: 16px 20px;
+    padding: 18px 24px; /* Increased from 16px 20px for better breathing room */
     border-radius: 12px 12px 0 0;
   }
 
@@ -203,6 +204,21 @@
     cursor: grabbing;
   }
 
+  /* Slider Container Improvements */
+  .slider-container {
+    padding: 0 4px; /* Prevent label cutoff */
+    margin-bottom: 24px; /* More breathing room */
+  }
+
+  .slider-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 12px; /* More space from slider */
+    padding: 0 2px; /* Ensure text not cut off */
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
   /* ========================================
      DATA TABLE - Tech Aesthetic
      ======================================== */
@@ -257,7 +273,7 @@
   }
 
   .data-table tbody td {
-    padding: 12px 16px;
+    padding: 14px 16px; /* Increased from 12px for better readability */
     color: var(--text-secondary);
   }
 

@@ -61,7 +61,6 @@ const ChannelTable = ({
               <>
                 {renderHeader('Lifebuoy (C)', 'lifebuoyReach')}
                 {renderHeader('M.Sandal (C)', 'mysore_sandalReach')}
-                {renderHeader('ATC Efficiency', 'atcIndex')}
               </>
             ) : (
               <>
@@ -81,7 +80,7 @@ const ChannelTable = ({
         <tbody className="divide-y divide-slate-50">
           {channels.length === 0 ? (
             <tr>
-              <td colSpan={isKarnataka ? 10 : 9} className="px-8 py-20 text-center">
+              <td colSpan={9} className="px-8 py-20 text-center">
                 <div className="flex flex-col items-center gap-4">
                   <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-200">
                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,11 +133,6 @@ const ChannelTable = ({
                     </td>
                     <td className="px-8 py-6 text-sm font-bold text-slate-500 italic">
                       {formatPercentage(channel.mysore_sandalReach || 0)}
-                    </td>
-                    <td className="px-8 py-6">
-                      <span className="text-sm font-black text-purple-600">
-                        {formatNumber(channel.atcIndex || 0)}
-                      </span>
                     </td>
                   </>
                 ) : (

@@ -1,7 +1,7 @@
 // ============================================================
 // CHANNEL LANGUAGE FILTER UTILITY
 // ============================================================
-// Purpose: Filter out Hindi channels from Karnataka market
+// Purpose: Filter out Hindi channels from Karnataka and Maharashtra markets
 
 import type { ChannelRecord, MarketName } from '../types';
 
@@ -85,19 +85,20 @@ export function isHindiChannel(channelName: string): boolean {
 }
 
 /**
- * Filters out Hindi channels from a channel list for Karnataka market
+ * Filters out Hindi channels from a channel list for Karnataka and Maharashtra markets
  */
 export function filterChannelsForMarket(
   channels: ChannelRecord[],
   market: MarketName
 ): ChannelRecord[] {
-  // Only filter for Karnataka market
-  if (market !== 'Karnataka') {
-    return channels;
+  // Filter Hindi channels for Karnataka and Maharashtra (Rest of Maharashtra)
+  // UP is a Hindi-speaking state, so Hindi channels remain there
+  if (market === 'Karnataka' || market === 'Maharashtra') {
+    return channels.filter(channel => !isHindiChannel(channel.channel));
   }
 
-  // Remove Hindi channels from Karnataka
-  return channels.filter(channel => !isHindiChannel(channel.channel));
+  // No filtering for other markets (e.g., UP)
+  return channels;
 }
 
 /**

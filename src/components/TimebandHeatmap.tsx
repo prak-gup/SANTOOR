@@ -10,14 +10,16 @@ interface TimebandHeatmapProps {
 
 function getHeatmapColor(value: number, metric: string): string {
   if (metric === 'reach' || metric === 'atcIndex') {
-    // Green scale for positive metrics
-    if (value >= 10) return '#10b981'; // Emerald-500
-    if (value >= 5) return '#34d399';  // Emerald-400
-    if (value >= 2) return '#6ee7b7';  // Emerald-300
-    if (value >= 0.5) return '#a7f3d0'; // Emerald-200
-    return '#d1fae5';                  // Emerald-100
+    // Sequential gradient: Green (best) → Blue (medium) → Red (poor)
+    if (value >= 80) return '#10b981';    // Green-500 - Top performers
+    if (value >= 60) return '#14b8a6';    // Teal-500 - Strong
+    if (value >= 40) return '#3b82f6';    // Blue-500 - Good
+    if (value >= 20) return '#6366f1';    // Indigo-500 - Moderate
+    if (value >= 10) return '#f97316';    // Orange-500 - Low
+    if (value >= 5) return '#ef4444';     // Red-500 - Poor
+    return '#9ca3af';                     // Gray-400 - Minimal/None
   } else {
-    // Red-Yellow-Green for gap
+    // Red-Yellow-Green for gap (keep existing - it's working well)
     if (value >= 5) return '#10b981';   // Leading (green)
     if (value >= 0) return '#fbbf24';   // Close (yellow)
     if (value >= -5) return '#f59e0b';  // Behind (orange)
@@ -26,8 +28,9 @@ function getHeatmapColor(value: number, metric: string): string {
 }
 
 function getHeatmapOpacity(value: number): number {
-  if (value === 0) return 0.2;
-  return Math.min(1, 0.3 + (Math.abs(value) / 20) * 0.7);
+  // Higher minimum opacity for better visibility
+  if (value === 0) return 0.3;  // Up from 0.2
+  return Math.min(1, 0.5 + (Math.abs(value) / 100) * 0.5);  // Range: 0.5-1.0
 }
 
 export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
@@ -58,25 +61,30 @@ export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
     : metric === 'gap' ? 'Gap'
     : 'ATC Index';
 
-  // Calculate indexes for reach and ATC (show indexes instead of raw %)
-  // For each channel, highest timeband = 100, others relative to it
+  // Calculate indexes for reach and ATC using GLOBAL normalization
+  // Find max across ALL channels and ALL timebands, then normalize everything against it
   const channelIndexes = new Map<string, Record<string, number>>();
 
   if (metric === 'reach' || metric === 'atcIndex') {
+    // STEP 1: Find global maximum across ALL channels and ALL timebands
+    let globalMax = 0.01; // Avoid division by zero
+
+    channelsWithTimebands.forEach(channel => {
+      if (!channel.timebands) return;
+      channel.timebands.forEach(tb => {
+        const value = metric === 'reach' ? tb.santoorReach : (tb.atcIndex ?? 0);
+        globalMax = Math.max(globalMax, value);
+      });
+    });
+
+    // STEP 2: Normalize ALL values against this global maximum
     channelsWithTimebands.forEach(channel => {
       if (!channel.timebands) return;
 
-      // Find max value for this channel across all timebands
-      const values = channel.timebands.map(tb =>
-        metric === 'reach' ? tb.santoorReach : (tb.atcIndex ?? 0)
-      );
-      const maxValue = Math.max(...values, 0.01); // Avoid division by zero
-
-      // Calculate index for each timeband (max = 100)
       const indexes: Record<string, number> = {};
       channel.timebands.forEach(tb => {
         const rawValue = metric === 'reach' ? tb.santoorReach : (tb.atcIndex ?? 0);
-        indexes[tb.timeband] = (rawValue / maxValue) * 100;
+        indexes[tb.timeband] = (rawValue / globalMax) * 100;  // Global scale
       });
 
       channelIndexes.set(channel.channel, indexes);
@@ -155,6 +163,7 @@ export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
               const timebandData = channel.timebands?.find(t => t.timeband === tb);
               let rawValue = 0;
               let displayValue = 0;
+              let colorValue = 0;
 
               if (timebandData) {
                 if (metric === 'reach') rawValue = timebandData.santoorReach;
@@ -162,18 +171,20 @@ export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
                 else if (metric === 'atcIndex') rawValue = timebandData.atcIndex ?? 0;
               }
 
-              // For reach and ATC, show index (max timeband = 100)
-              // For gap, show raw number
+              // For reach and ATC, show index and use index for color
+              // For gap, show raw number and use raw for color
               if (metric === 'reach' || metric === 'atcIndex') {
                 const indexes = channelIndexes.get(channel.channel);
                 displayValue = indexes ? (indexes[tb] ?? 0) : 0;
+                colorValue = displayValue;  // Use index for color too!
               } else {
                 displayValue = rawValue;
+                colorValue = rawValue;
               }
 
-              // Use raw value for color calculation
-              const bgColor = getHeatmapColor(rawValue, metric);
-              const opacity = getHeatmapOpacity(rawValue);
+              // Use colorValue (index for reach/ATC, raw for gap) for color calculation
+              const bgColor = getHeatmapColor(colorValue, metric);
+              const opacity = getHeatmapOpacity(colorValue);
 
               // Tooltip shows both index and raw value for reach/ATC
               const tooltipText = metric === 'reach'
@@ -191,7 +202,8 @@ export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
                     background: bgColor,
                     opacity: opacity,
                     fontWeight: 600,
-                    color: Math.abs(rawValue) > 5 ? 'white' : 'var(--text-primary)',
+                    color: displayValue > 50 ? '#fff' : '#1f2937',  // White text on dark backgrounds
+                    textShadow: displayValue > 50 ? '0 1px 2px rgba(0,0,0,0.3)' : 'none',
                     transition: 'all 0.2s ease',
                     cursor: 'pointer',
                     fontSize: '11px'
@@ -250,23 +262,35 @@ export const TimebandHeatmap: React.FC<TimebandHeatmapProps> = ({
           {metric === 'reach' || metric === 'atcIndex' ? (
             <>
               <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
-                Index: Best timeband = 100, others relative
+                Global Index: Best across all channels & timebands = 100
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <div style={{ width: '20px', height: '12px', background: '#10b981', borderRadius: '2px' }} />
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Strong (90-100)</span>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Top Performers (80-100)</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: '20px', height: '12px', background: '#34d399', borderRadius: '2px' }} />
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Good (60-90)</span>
+                <div style={{ width: '20px', height: '12px', background: '#14b8a6', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Strong (60-80)</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: '20px', height: '12px', background: '#6ee7b7', borderRadius: '2px' }} />
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Moderate (30-60)</span>
+                <div style={{ width: '20px', height: '12px', background: '#3b82f6', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Good (40-60)</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: '20px', height: '12px', background: '#a7f3d0', borderRadius: '2px' }} />
-                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Weak (&lt;30)</span>
+                <div style={{ width: '20px', height: '12px', background: '#6366f1', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Moderate (20-40)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ width: '20px', height: '12px', background: '#f97316', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Low (10-20)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ width: '20px', height: '12px', background: '#ef4444', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Poor (5-10)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ width: '20px', height: '12px', background: '#9ca3af', borderRadius: '2px' }} />
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Minimal (&lt;5)</span>
               </div>
             </>
           ) : (

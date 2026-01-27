@@ -111,20 +111,21 @@ function InfoButton({ isActive, onClick, children }: InfoButtonProps) {
         <div style={{
           position: 'absolute',
           top: '24px',
-          right: '0',
+          left: '0',
           zIndex: 1000,
-          background: 'white',
+          background: 'var(--surface-1)',
           border: '2px solid var(--orange-bright)',
           borderRadius: '8px',
           padding: '16px',
           minWidth: '320px',
           maxWidth: '420px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
           fontSize: '11px',
           lineHeight: '1.5',
           overflowWrap: 'break-word',
           wordWrap: 'break-word',
-          wordBreak: 'normal'
+          wordBreak: 'normal',
+          color: 'var(--text-primary)'
         }}>
           {children}
         </div>

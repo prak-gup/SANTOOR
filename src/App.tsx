@@ -18,6 +18,8 @@ import { generateSampleTimebandData, enrichChannelWithTimebands, TIMEBAND_DISPLA
 import { getTimebandStatus, getTimebandRecommendation } from './utils/timebandAnalysis';
 import { generateSimplifiedInsights } from './utils/plannerInsights';
 import { filterChannelsForMarket } from './utils/channelLanguageFilter';
+import { useTheme } from './hooks/useTheme';
+import ThemeToggle from './components/ThemeToggle';
 
 type MarketName = string;
 
@@ -146,6 +148,9 @@ const DISPLAY_TO_MARKET: Record<string, MarketName> = {
 };
 
 export default function App() {
+  // Theme state
+  const { theme, toggleTheme } = useTheme();
+
   // Tab navigation state
   const [activeTab, setActiveTab] = useState<'channel' | 'timeband'>('channel');
 
@@ -392,7 +397,10 @@ export default function App() {
               </p>
             </div>
 
-            {/* Right: Logos */}
+            {/* Right: Theme Toggle */}
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+
+            {/* Right: Logos (commented out) */}
             {/* TODO: Add logo files to src/assets/ folder:
                 - wpp-logo.svg (or .png)
                 - sync-logo.svg (or .png)

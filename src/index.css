@@ -40,6 +40,119 @@
   --glow-red: 0 0 15px rgba(239, 68, 68, 0.25);
 }
 
+/* ============================================
+   LIGHT THEME
+   ============================================ */
+
+[data-theme="light"] {
+  /* Background & Surfaces */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #FAFAFA;
+  --bg-tertiary: #F5F5F5;
+  --surface-1: #FFFFFF;
+  --surface-2: #F8F9FA;
+  --surface-3: #ECEFF1;
+
+  /* Text Colors */
+  --text-primary: #1A1A1A;
+  --text-secondary: #4A5568;
+  --text-tertiary: #718096;
+  --text-dim: #A0AEC0;
+
+  /* Santoor Brand (unchanged) */
+  --orange-bright: #FF6B00;
+  --orange-glow: #FF8533;
+  --orange-dim: #CC5500;
+
+  /* Signal Colors (adjusted for light bg) */
+  --signal-positive: #059669;
+  --signal-warning: #D97706;
+  --signal-negative: #DC2626;
+  --signal-info: #2563EB;
+  --signal-purple: #9333EA;
+
+  /* Borders & Effects */
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --glow-orange: 0 0 20px rgba(255, 107, 0, 0.15);
+  --glow-green: 0 0 15px rgba(5, 150, 105, 0.15);
+  --glow-red: 0 0 15px rgba(220, 38, 38, 0.15);
+}
+
+/* Smooth theme transitions */
+:root,
+[data-theme="light"] {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+* {
+  transition: background-color 0.3s ease,
+              color 0.3s ease,
+              border-color 0.3s ease,
+              box-shadow 0.3s ease;
+}
+
+/* Light theme component adjustments */
+[data-theme="light"] .data-table tbody tr:hover {
+  background: rgba(255, 107, 0, 0.03);
+}
+
+[data-theme="light"] .panel {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .panel:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .signal-positive {
+  background: rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.2);
+  box-shadow: 0 0 8px rgba(5, 150, 105, 0.1);
+}
+
+[data-theme="light"] .signal-warning {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.2);
+  box-shadow: 0 0 8px rgba(217, 119, 6, 0.1);
+}
+
+[data-theme="light"] .signal-negative {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.2);
+  box-shadow: 0 0 8px rgba(220, 38, 38, 0.1);
+}
+
+[data-theme="light"] .signal-info {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+  box-shadow: 0 0 8px rgba(37, 99, 235, 0.1);
+}
+
+[data-theme="light"] .signal-purple {
+  background: rgba(147, 51, 234, 0.08);
+  border-color: rgba(147, 51, 234, 0.2);
+  box-shadow: 0 0 8px rgba(147, 51, 234, 0.1);
+}
+
+[data-theme="light"] .btn-tactical:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .btn-tactical.active {
+  background: linear-gradient(135deg, var(--orange-bright), var(--orange-glow));
+  color: white;
+}
+
+[data-theme="light"] .metric-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .metric-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
 @layer base {
   * {
     box-sizing: border-box;

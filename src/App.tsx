@@ -654,7 +654,7 @@ export default function App() {
           </div>
 
           <div className="metric-card" style={{ textAlign: 'center' }}>
-            <div className="metric-label">AVG GAP</div>
+            <div className="metric-label">Avg Reach Gap</div>
             <div className="metric-value" style={{
               color: summary.avgGap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)'
             }}>

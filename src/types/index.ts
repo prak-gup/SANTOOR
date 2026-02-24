@@ -191,6 +191,7 @@ export interface SantoorData {
 }
 
 export type MarketName = 'UP' | 'Maharashtra' | 'Karnataka';
+export type MainViewTab = 'channel' | 'timeband' | 'district';
 
 export type SortField = keyof ChannelRecord;
 export type SortDirection = 'asc' | 'desc';

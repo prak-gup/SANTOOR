@@ -197,7 +197,8 @@ describe('invariants over every intensity x threshold x market x SCR', () => {
           }
           if (o.action === 'DECREASE') {
             expect(-o.weightDelta).toBeLessThanOrEqual(MAX_CUT_FRACTION * r + 1e-7);
-            expect(r).toBeGreaterThanOrEqual(comp); // only leaders donate
+            expect(s.protectedSet.has(o.channel)).toBe(false); // only unprotected channels donate
+            if (r >= comp) expect(o.projected.base).toBeGreaterThanOrEqual(comp - 1e-6); // a leader is never cut below parity
           }
         }
       }
@@ -242,16 +243,62 @@ describe('invariants over every intensity x threshold x market x SCR', () => {
   });
 });
 
-describe('default levers (intensity 15, threshold 70) stay modest', () => {
+describe('default levers (intensity 15, threshold 30) are visible and modest', () => {
   it('keeps the Layer 2 headline small for every market and SCR', () => {
     for (const c of cells) {
       const s = c.grid.get(key(DEFAULT_LEVERS.intensity, DEFAULT_LEVERS.threshold))!;
       expect(s.layer2).not.toBeNull();
       const l2 = s.layer2!;
-      expect(l2.gainReachPoints.high).toBeLessThanOrEqual(0.03 * s.rosterWeight);
-      expect(Math.abs(l2.netReachPoints.base)).toBeLessThanOrEqual(0.02 * s.rosterWeight);
+      expect(l2.gainReachPoints.base).toBeLessThanOrEqual(0.05 * s.rosterWeight);
+      expect(Math.abs(l2.netReachPoints.base)).toBeLessThan(0.05 * s.rosterWeight);
       expect(l2.gapClosedShare.high).toBeLessThanOrEqual(MODEL_PARAMS.MAX_GAP_CLOSED);
-      expect(s.movedShareRoster).toBeLessThanOrEqual(0.05);
+      expect(s.movedShareRoster).toBeLessThanOrEqual(0.08);
+    }
+  });
+
+  it('shows a visible plan in every Overall SCR at the default levers', () => {
+    for (const c of cells.filter(x => x.scr.endsWith('Overall'))) {
+      const s = c.grid.get(key(DEFAULT_LEVERS.intensity, DEFAULT_LEVERS.threshold))!;
+      expect(s.counts.ADD + s.counts.INCREASE + s.counts.DECREASE, `${c.scr} default plan`).toBeGreaterThanOrEqual(1);
+      expect(s.movedWeight).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('intensity is alive', () => {
+  it('moves strictly more weight from intensity 10 to 30 to 50 unless the notice reports used-up headroom', () => {
+    for (const c of cells.filter(x => x.scr.endsWith('Overall'))) {
+      for (const t of [30, 70]) {
+        const [a, b, d] = [10, 30, 50].map(i => c.grid.get(key(i, t))!);
+        for (const [lo, hi] of [[a, b], [b, d]] as const) {
+          if (hi.movedWeight > lo.movedWeight + 1e-9) continue;
+          // not strictly more: only allowed if the lower setting already used all headroom and says so with a number
+          expect(lo.notice, `${c.scr} t=${t} i=${lo.levers.intensity} flat without explanation`).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Nothing can move/);
+          expect(hi.notice).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Nothing can move/);
+        }
+        // and requested weight is moved in full whenever headroom is not the limit
+        for (const s of [a, b, d]) {
+          if (!s.limitedBelowRequest) expect(s.movedWeight).toBeCloseTo(s.requestedWeight, 6);
+        }
+      }
+    }
+  });
+
+  it('responds to intensity at the default threshold: 0 differs from the default, and UP keeps growing past 10', () => {
+    for (const c of cells.filter(x => x.scr.endsWith('Overall'))) {
+      const moved = STEPS.map(i => c.grid.get(key(i, DEFAULT_LEVERS.threshold))!.movedWeight);
+      expect(moved[0]).toBe(0);
+      expect(new Set(moved.map(m => m.toFixed(6))).size, `${c.scr}`).toBeGreaterThanOrEqual(2);
+    }
+    const up = STEPS.map(i => cells.find(x => x.scr === 'UP Overall')!.grid.get(key(i, DEFAULT_LEVERS.threshold))!.movedWeight);
+    expect(new Set(up.map(m => m.toFixed(6))).size).toBeGreaterThan(3);
+  });
+
+  it('never recommends a move that loses reach under the low curve', () => {
+    for (const c of cells) {
+      for (const s of c.grid.values()) {
+        if (s.layer2) expect(s.layer2.netReachPoints.low).toBeGreaterThanOrEqual(-1e-9);
+      }
     }
   });
 });
@@ -293,6 +340,7 @@ describe('engine behaviour on a controlled region', () => {
     ];
     const original = MODEL_PARAMS.GAIN_OVER_LOSS;
     MODEL_PARAMS.GAIN_OVER_LOSS = 0.001; // force weight to keep flowing until the caps bind
+    MODEL_PARAMS.REQUIRE_LOW_CASE_NET = false;
     try {
       const s = computeScenario(rows, 'Maharashtra', { intensity: 100, threshold: 0 });
       let reachedCap = false;
@@ -311,6 +359,7 @@ describe('engine behaviour on a controlled region', () => {
       expect(s.layer2!.gapClosedShare.high).toBeLessThanOrEqual(MODEL_PARAMS.MAX_GAP_CLOSED + 1e-9);
     } finally {
       MODEL_PARAMS.GAIN_OVER_LOSS = original;
+      MODEL_PARAMS.REQUIRE_LOW_CASE_NET = true;
     }
   });
 

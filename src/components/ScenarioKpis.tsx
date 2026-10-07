@@ -181,7 +181,7 @@ export default function ScenarioKpis({ scenario: s, baseline, statusClasses }: P
           label="Increase"
           value={s.counts.INCREASE}
           color="var(--signal-positive)"
-          how="Active channels where Santoor trails by ≥1.0 pt and extra weight earns more reach than a donor gives up (≥1.15×)."
+          how="Active channels where Santoor trails by ≥1.0 pt and extra weight earns more reach than a donor gives up, even under the pessimistic curve."
         />
         <Card
           label="Maintain"
@@ -194,7 +194,7 @@ export default function ScenarioKpis({ scenario: s, baseline, statusClasses }: P
           label="Decrease"
           value={s.counts.DECREASE}
           color="var(--signal-negative)"
-          how="Unprotected channels where Santoor leads its competitor; they give up weight, never more than 50% and never below competitor parity."
+          how="Unprotected channels where weight earns least (saturated, or little to defend); they give up weight, never more than 50% of it, and a leading channel is never cut below competitor parity."
         />
         <Card
           label="High priority"

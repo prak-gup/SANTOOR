@@ -562,10 +562,10 @@ export default function App() {
                           ⚡ INTENSITY
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          Share of the unprotected reach-point weight to reallocate. 0% changes nothing; higher values move more weight from leading channels to channels where Santoor trails.
+                          Share of the unprotected reach-point weight to reallocate. 0% changes nothing; higher values move more weight from the lowest-return unprotected channels to channels where Santoor trails.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          The engine only moves weight while a receiving channel earns at least 1.15x what a donor gives up, so very high intensities can plateau. The notice under the KPIs says when that happens.
+                          The engine only moves weight while a receiving channel earns more reach than a donor gives up (also under the pessimistic curve), so high intensities can plateau once that headroom is used. The notice under the KPIs says when, with the number.
                         </div>
                       </div>
                     </InfoButton>
@@ -622,7 +622,7 @@ export default function App() {
                           The top X% of Santoor-active channels, ranked by Santoor reach, are frozen before any rule runs. Protected channels are never cut, but can still receive weight where Santoor trails.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          Higher = more channels frozen, fewer donors, fewer changes. Because it counts channels, not weight, even a 70% threshold usually freezes 85-95% of the reach-point weight.
+                          Higher = more channels frozen, fewer donors, fewer changes. Because it counts channels, not weight, a 70% threshold usually freezes 85-95% of the reach-point weight; the default is 30%.
                         </div>
                       </div>
                     </InfoButton>

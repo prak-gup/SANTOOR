@@ -32,12 +32,13 @@ Because THRESHOLD counts channels and not weight, protecting the top 70% of chan
 
 A channel is held (always MAINTAIN) if it carries a data flag (section 7). Otherwise:
 
-- **Receiver (INCREASE candidate):** Santoor reach > 0, best-competitor reach >= 0.5, and the competitor leads by >= 1.0 pt.
+- **Receiver (INCREASE candidate):** Santoor reach > 0, best-competitor reach >= 0.5, and the competitor leads by >= 0.5 pt. Protected channels can receive.
 - **Receiver (ADD candidate):** Santoor reach 0, competitor reach >= 2.0, channel share >= 1.0 (the original white-space rule).
-- **Donor:** unprotected, Santoor reach >= best-competitor reach (index >= 100), competitor reach >= 0.5.
+- **Donor:** any unprotected, unflagged active channel with competitor reach >= 0.5. Donors are ranked by **lowest marginal reach return per weight point**, so the channels that give first are the ones where extra weight earns least: (a) leaders, which are saturated (curve ceiling `r * (1 + eta)`); and (b) channels that trail only slightly, where the remaining gap is small so the curve is already flat. The row says "Low return: ... each reach-point of weight here earns only ~0.3".
+- A channel cannot be both a donor and a receiver in one scenario.
 - Everything else is MAINTAIN.
 
-A donor never gives more than 50% of its own weight, and never so much that its projected reach falls below the competitor's (it cannot be turned from a leader into a laggard by the cut).
+A donor never gives more than 50% of its own weight. A donor that leads its competitor is never cut below competitor parity.
 
 ## 4. Response curve
 
@@ -53,13 +54,14 @@ anchored on the observed point: `R(w_i) = r_i` with `w_i = r_i`, so `k = -ln(1 -
 |---|---|---|
 | Receiver on a channel where Santoor is behind | `r + phi * (c - r)` | Never above the competitor's reach `c`. `phi` is the share of the gap that is attainable at saturation. |
 | Donor on a channel where Santoor leads | `r * (1 + eta)` | No uplift is claimed on a leading channel; `eta` is residual headroom (more headroom = steeper loss when cut). |
+| Donor on a channel where Santoor trails | `r + phiDonor * (c - r)` | Same shape as a receiver; the closer to the competitor, the flatter the curve and the cheaper the cut. |
 | ADD (new channel) | `0.5 * phi * c` | Entry reach well below the competitor's. Curve starts at (0, 0); weight converts to reach at 0.5x the rate of an established channel (entry friction) and the curve is calibrated so a new channel earns the roster-average yield (1 reach-point per weight point) at 60% of its ceiling. |
 
 ## 5. Allocation: greedy water-filling
 
 1. Move weight in slices of `unprotected weight / 200`.
 2. For each slice, take from the donor with the lowest marginal return (ties: strongest lead, then channel share, then name) and give to the receiver with the highest marginal return (ties: largest gap, then share, then name).
-3. Stop when any of these holds: the requested move is reached; no donor or receiver has capacity; or the best receiver's marginal return is below **1.15x** the cheapest donor's (moving more would not pay for itself).
+3. Stop when any of these holds: the requested move is reached; no donor or receiver has capacity; the best receiver's marginal return does not beat the cheapest donor's (moving more would not pay for itself); or the next slice would have a **negative net change under the low curve** (see section 6). A move is therefore only ever made if it is robust to the pessimistic curve.
 4. A new channel is only ever funded in one block large enough to give at least 0.5 reach-points of entry reach (base curve); smaller entries are not recommended.
 5. A receiver stops at the point where its projected reach would close 60% of its gap (INCREASE) or reach 90% of its entry ceiling (ADD).
 
@@ -67,7 +69,7 @@ The sequence of moves depends only on the data and the threshold. Intensity deci
 
 Every channel gets exactly one action: ADD (weight added to a new channel), INCREASE (weight added), DECREASE (weight removed), MAINTAIN. The four counts add up to the number of in-scope channels. HIGH priority = an INCREASE with a gap of 5+ pts, or an ADD with competitor reach above 5%.
 
-When nothing, or less than requested, can move, the app says why (no leading unprotected channel, benefit rule, donor limit, or entry floor).
+When less than requested can move, the app says "Headroom used up: X of Y requested reach-pts moved" and why. Intensity therefore moves weight in proportion to the request only until that headroom is used; in Rest of Maharashtra and Karnataka the headroom is small (few channels where Santoor trails), so intensity plateaus early. That is a property of the data, not of the slider.
 
 ## 6. Layer 2: "Indicative scenario - modelled, not a forecast"
 
@@ -84,9 +86,11 @@ Computed on **touched channels only**, from the allocation above. Reported as ba
 
 | Case | `phi` (share of gap attainable) | `eta` (donor headroom) | Meaning |
 |---|---|---|---|
-| Low | 0.50 | 0.50 | Receivers saturate sooner, donors lose more per point. |
-| Base | 0.75 | 0.25 | |
-| High | 1.00 | 0.10 | Receivers reach the competitor level at saturation (but still capped at 60% of the gap per channel), donors lose less. |
+| Low | 0.50 | 0.50 | Receivers saturate sooner, donors lose more per point (`phiDonor` 1.00 for trailing donors). |
+| Base | 0.75 | 0.25 | (`phiDonor` 0.75) |
+| High | 1.00 | 0.10 | Receivers reach the competitor level at saturation (but still capped at 60% of the gap per channel), donors lose less (`phiDonor` 0.50). |
+
+The low case is also a **gate**: a slice of weight is only moved if its net reach change under the low curve (receivers saturate sooner, donors lose more) is >= 0. So the low band of the net change is never negative (tested for every lever combination).
 
 Layer 2 is suppressed when a region has fewer than 8 active channels. Layer 1 still works there.
 
@@ -119,7 +123,7 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 - The average reach gap card is a simple unweighted average over channels, as in the original tool. Its scenario value is modelled on the base curve.
 - Karnataka is an ATC market in the source file, but the engine uses the reach and gap fields exactly as in the other markets. ATC index is shown as observed and is not modelled.
 - Timeband figures are synthetic sample data and are hidden unless the URL has `?debug=1`.
-- At the default levers the model moves little or nothing in some markets (see the PR). That is a finding about the data (every unprotected UP and Karnataka channel is either behind or has no usable competitor reference), not a bug.
+- The default threshold is **30** (top 30% of Santoor channels frozen), not 70. At 70, Rest of Maharashtra and Karnataka produce no defensible move: protected channels hold 88-97% of the weight, and the few unprotected Karnataka channels are all flagged regional-language channels that the engine holds. At 30 every Overall SCR shows a plan, still small. The meaning of the threshold is unchanged.
 
 ## 9. Data that would upgrade the model
 
@@ -136,15 +140,15 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 
 | Parameter | Value |
 |---|---|
-| Min gap to INCREASE | 1.0 pt |
+| Min gap to INCREASE | 0.5 pt |
 | White-space rule | competitor >= 2.0, share >= 1.0 |
 | Min competitor reference | 0.5 |
 | Max cut per donor | 50% of its weight |
 | Max gap closed per channel | 60% |
 | Entry cap | 50% of competitor reach |
 | Min entry reach (new channel) | 0.5 reach-points |
-| Benefit rule (gain / loss) | 1.15x |
+| Benefit rule (gain / loss) | 1.0x, plus low-case net >= 0 on every slice |
 | Entry friction / reference saturation | 0.5 / 0.6 |
 | Slices | 200 |
 | Layer 2 minimum active channels | 8 |
-| Bands (`phi`, `eta`) | low (0.50, 0.50), base (0.75, 0.25), high (1.00, 0.10) |
+| Bands (`phi`, `eta`, `phiDonor`) | low (0.50, 0.50, 1.00), base (0.75, 0.25, 0.75), high (1.00, 0.10, 0.50) |

@@ -27,11 +27,11 @@ export interface Levers {
   threshold: number;
 }
 
-export const DEFAULT_LEVERS: Levers = { intensity: 15, threshold: 70 };
+export const DEFAULT_LEVERS: Levers = { intensity: 15, threshold: 30 };
 
 export const MODEL_PARAMS = {
   /** Behind channels need at least this reach gap (pts) to be a receiver. */
-  MIN_GAP_TO_ACT: 1.0,
+  MIN_GAP_TO_ACT: 0.5,
   /** White-space (ADD) rule, unchanged from the original filter: competitor reach and channel share. */
   ADD_MIN_COMP_REACH: 2.0,
   ADD_MIN_SHARE: 1.0,
@@ -41,8 +41,10 @@ export const MODEL_PARAMS = {
   MAX_GAP_CLOSED: 0.6,
   /** Entry reach on an ADD channel never exceeds this fraction of competitor reach. */
   ADD_CAP_OF_COMP: 0.5,
+  /** Only make a move whose net reach change is >= 0 under the pessimistic (low) curve. Tests switch it off to exercise the caps. */
+  REQUIRE_LOW_CASE_NET: true,
   /** A move happens only if the receiver returns at least this multiple of what the donor gives up. */
-  GAIN_OVER_LOSS: 1.15,
+  GAIN_OVER_LOSS: 1.0,
   /** A new channel is only recommended if it can earn at least this much reach (reach %, base curve). */
   MIN_ENTRY_REACH: 0.5,
   /** A new channel converts weight to reach at this fraction of an established channel's rate. */
@@ -56,13 +58,15 @@ export const MODEL_PARAMS = {
   /**
    * Curve-shape sensitivity.
    * phi: share of the competitor gap that is attainable at saturation (receivers).
-   * eta: headroom above today's reach at saturation (donors); more headroom = steeper loss.
+   * eta: headroom above today's reach at saturation (donors that lead); more headroom = steeper loss.
+   * phiDonor: same idea for donors that trail (share of their gap that extra weight could still win).
+   * Low case = receivers saturate sooner AND donors lose more; high case = the reverse.
    */
   BANDS: {
-    low: { phi: 0.5, eta: 0.5 },
-    base: { phi: 0.75, eta: 0.25 },
-    high: { phi: 1.0, eta: 0.1 },
-  } as Record<BandName, { phi: number; eta: number }>,
+    low: { phi: 0.5, eta: 0.5, phiDonor: 1.0 },
+    base: { phi: 0.75, eta: 0.25, phiDonor: 0.75 },
+    high: { phi: 1.0, eta: 0.1, phiDonor: 0.5 },
+  } as Record<BandName, { phi: number; eta: number; phiDonor: number }>,
 };
 
 const P = MODEL_PARAMS;
@@ -227,9 +231,13 @@ interface Receiver {
 }
 interface Donor {
   ch: ChannelRecord;
+  /** true: Santoor leads (curve has little headroom). false: trails but extra weight earns little. */
+  leader: boolean;
   curve: Curve;
   zMax: number;
   z: number;
+  /** marginal reach per weight point at the start (base curve), for the reason string. */
+  m0: number;
 }
 
 export function computeScenario(
@@ -275,13 +283,36 @@ export function computeScenario(
       const capReach = r + P.MAX_GAP_CLOSED * (c - r);
       const xMax = Math.max(0, -Math.log(1 - capReach / curve.rmax) / curve.k - curve.w0);
       receivers.push({ ch, kind: 'INCREASE', curve, xMax, xMin: 0, x: 0, skip: false });
-    } else if (r >= c && !protectedSet.has(ch.channel)) {
-      const curve = observedCurve(r, donorCeiling(r, base.eta));
-      // a donor never falls behind the competitor because of the cut
-      const wAtParity = -Math.log(1 - c / curve.rmax) / curve.k;
-      donors.push({ ch, curve, zMax: Math.max(0, Math.min(P.MAX_CUT_FRACTION * r, r - wAtParity)), z: 0 });
+    }
+    // Any unprotected channel can donate; the lowest marginal return gives first.
+    if (!protectedSet.has(ch.channel)) {
+      if (r >= c) {
+        const curve = observedCurve(r, donorCeiling(r, base.eta));
+        // a leading donor never falls behind the competitor because of the cut
+        const wAtParity = -Math.log(1 - c / curve.rmax) / curve.k;
+        donors.push({ ch, leader: true, curve, zMax: Math.max(0, Math.min(P.MAX_CUT_FRACTION * r, r - wAtParity)), z: 0, m0: marginal(curve, r) });
+      } else {
+        const curve = observedCurve(r, receiverCeiling(r, c, base.phiDonor));
+        donors.push({ ch, leader: false, curve, zMax: P.MAX_CUT_FRACTION * r, z: 0, m0: marginal(curve, r) });
+      }
     }
   }
+
+  // ---- projections per band (explicit x / z so moves can be checked before they are applied) --
+  const recProj = (rc: Receiver, band: BandName, x: number): number => {
+    const { phi } = P.BANDS[band];
+    const r = rc.ch.santoorReach;
+    const c = rc.ch.maxCompReach;
+    if (rc.kind === 'ADD') return Math.min(resp(entryCurve(entryCeiling(c, phi)), x), P.ADD_CAP_OF_COMP * c);
+    return Math.min(resp(observedCurve(r, receiverCeiling(r, c, phi)), r + x), r + P.MAX_GAP_CLOSED * (c - r));
+  };
+  const donProj = (d: Donor, band: BandName, z: number): number => {
+    const r = d.ch.santoorReach;
+    const c = d.ch.maxCompReach;
+    const b = P.BANDS[band];
+    const curve = d.leader ? observedCurve(r, donorCeiling(r, b.eta)) : observedCurve(r, receiverCeiling(r, c, b.phiDonor));
+    return Math.max(0, resp(curve, r - z));
+  };
 
   // ---- weights ---------------------------------------------
   const rosterWeight = active.reduce((s, c) => s + c.santoorReach, 0);
@@ -299,37 +330,46 @@ export function computeScenario(
   let remaining = requestedWeight;
   let guard = 0;
   let stopReason: StopReason = 'none';
-  while (remaining > EPS && delta > 0 && guard++ < P.STEPS * 4) {
+  const rxBy = new Map(receivers.map(r => [r.ch.channel, r]));
+  const pickDonor = (except: ChannelRecord | null): Donor | null => {
+    let best: Donor | null = null;
+    let bestM = Infinity;
+    for (const d of donors) {
+      if (d.z >= d.zMax - EPS || d.ch === except) continue;
+      if ((rxBy.get(d.ch.channel)?.x ?? 0) > EPS) continue; // already a receiver
+      const m = marginal(d.curve, d.curve.w0 - d.z);
+      if (m < bestM - EPS || (Math.abs(m - bestM) <= EPS && best && compareDonor(d, best) < 0)) {
+        best = d;
+        bestM = m;
+      }
+    }
+    return best;
+  };
+  const donorM = (d: Donor) => marginal(d.curve, d.curve.w0 - d.z);
+  const donBy = new Map(donors.map(d => [d.ch.channel, d]));
+
+  while (remaining > EPS && delta > 0 && guard++ < P.STEPS * 6) {
     let rec: Receiver | null = null;
     let recM = -Infinity;
     for (const r of receivers) {
       if (r.skip || r.x >= r.xMax - EPS) continue;
+      if ((donBy.get(r.ch.channel)?.z ?? 0) > EPS) continue; // already a donor
       const m = marginal(r.curve, r.curve.w0 + r.x);
-      if (
-        m > recM + EPS ||
-        (Math.abs(m - recM) <= EPS && rec && compareReceiver(r, rec) < 0)
-      ) {
+      if (m > recM + EPS || (Math.abs(m - recM) <= EPS && rec && compareReceiver(r, rec) < 0)) {
         rec = r;
         recM = m;
       }
     }
-    let don: Donor | null = null;
-    let donM = Infinity;
-    for (const d of donors) {
-      if (d.z >= d.zMax - EPS) continue;
-      const m = marginal(d.curve, d.curve.w0 - d.z);
-      if (
-        m < donM - EPS ||
-        (Math.abs(m - donM) <= EPS && don && compareDonor(d, don) < 0)
-      ) {
-        don = d;
-        donM = m;
-      }
-    }
-    if (!rec || !don) {
-      stopReason = !don ? 'donors' : 'receivers';
+    if (!rec) {
+      stopReason = 'receivers';
       break;
     }
+    const don = pickDonor(rec.ch);
+    if (!don) {
+      stopReason = 'donors';
+      break;
+    }
+    const donM = donorM(don);
     if (recM < P.GAIN_OVER_LOSS * donM) {
       stopReason = 'benefit';
       break;
@@ -337,7 +377,10 @@ export function computeScenario(
 
     if (rec.kind === 'ADD' && rec.x === 0) {
       // Entry block: a new channel must clear the minimum entry reach, funded from one or more donors.
-      const capacity = donors.reduce((sum, d) => sum + Math.max(0, d.zMax - d.z), 0);
+      const capacity = donors.reduce(
+        (sum, d) => (d.ch === rec!.ch || (rxBy.get(d.ch.channel)?.x ?? 0) > EPS ? sum : sum + Math.max(0, d.zMax - d.z)),
+        0
+      );
       const avgYield = P.MIN_ENTRY_REACH / rec.xMin;
       if (capacity < rec.xMin - EPS || avgYield < P.GAIN_OVER_LOSS * donM) {
         rec.skip = true;
@@ -347,22 +390,23 @@ export function computeScenario(
         stopReason = 'entry';
         break;
       }
+      const taken = new Map<Donor, number>();
       let need = rec.xMin;
       while (need > EPS) {
-        let d2: Donor | null = null;
-        let m2 = Infinity;
-        for (const d of donors) {
-          if (d.z >= d.zMax - EPS) continue;
-          const m = marginal(d.curve, d.curve.w0 - d.z);
-          if (m < m2 - EPS || (Math.abs(m - m2) <= EPS && d2 && compareDonor(d, d2) < 0)) {
-            d2 = d;
-            m2 = m;
-          }
-        }
+        const d2 = pickDonor(rec.ch);
         if (!d2) break;
         const a = Math.min(delta, need, d2.zMax - d2.z);
         d2.z += a;
+        taken.set(d2, (taken.get(d2) ?? 0) + a);
         need -= a;
+      }
+      // robust under the pessimistic curve: low-case net change must not be negative
+      let lossLow = 0;
+      for (const [d, a] of taken) lossLow += donProj(d, 'low', d.z - a) - donProj(d, 'low', d.z);
+      if (need > EPS || (P.REQUIRE_LOW_CASE_NET && recProj(rec, 'low', rec.xMin) - lossLow < 0)) {
+        for (const [d, a] of taken) d.z -= a;
+        rec.skip = true;
+        continue;
       }
       rec.x = rec.xMin;
       movedWeight += rec.xMin;
@@ -370,8 +414,16 @@ export function computeScenario(
       continue;
     }
 
-    const step = Math.min(delta, remaining, rec.xMax - rec.x, don.zMax - don.z);
-    if (step <= EPS) break;
+    // Check the full-size slice first, so the verdict does not depend on how much of the request is left.
+    const full = Math.min(delta, rec.xMax - rec.x, don.zMax - don.z);
+    if (full <= EPS) break;
+    const gainLow = recProj(rec, 'low', rec.x + full) - recProj(rec, 'low', rec.x);
+    const lossLow = donProj(don, 'low', don.z) - donProj(don, 'low', don.z + full);
+    if (P.REQUIRE_LOW_CASE_NET && gainLow - lossLow < 0) {
+      stopReason = 'low';
+      break;
+    }
+    const step = Math.min(full, remaining);
     rec.x += step;
     don.z += step;
     movedWeight += step;
@@ -390,23 +442,8 @@ export function computeScenario(
     movedWeight,
   });
 
-  // ---- projections per band --------------------------------
-  const projectReceiver = (rc: Receiver, band: BandName): number => {
-    const { phi } = P.BANDS[band];
-    const r = rc.ch.santoorReach;
-    const c = rc.ch.maxCompReach;
-    if (rc.kind === 'ADD') {
-      const v = resp(entryCurve(entryCeiling(c, phi)), rc.x);
-      return Math.min(v, P.ADD_CAP_OF_COMP * c);
-    }
-    const v = resp(observedCurve(r, receiverCeiling(r, c, phi)), r + rc.x);
-    return Math.min(v, r + P.MAX_GAP_CLOSED * (c - r));
-  };
-  const projectDonor = (d: Donor, band: BandName): number => {
-    const r = d.ch.santoorReach;
-    const { eta } = P.BANDS[band];
-    return Math.max(0, resp(observedCurve(r, donorCeiling(r, eta)), r - d.z));
-  };
+  const projectReceiver = (rc: Receiver, band: BandName): number => recProj(rc, band, rc.x);
+  const projectDonor = (d: Donor, band: BandName): number => donProj(d, band, d.z);
 
   const touchedReceivers = receivers.filter(r => r.x > EPS);
   const touchedDonors = donors.filter(d => d.z > EPS);
@@ -449,7 +486,10 @@ export function computeScenario(
       action = 'DECREASE';
       weightDelta = -dn.z;
       projected = bandValues(b => projectDonor(dn, b));
-      reason = `Leads ${comp} by ${f1(r - c)} pts, index ${idx(ch)}, not protected → DECREASE -${fmtDelta(dn.z)} reach-pts (${Math.round((dn.z / r) * 100)}% of its weight), reach ${f1(r)}% → ${f1(projected.base)}%`;
+      const cut = `DECREASE -${fmtDelta(dn.z)} reach-pts (${Math.round((dn.z / r) * 100)}% of its weight), reach ${f1(r)}% → ${f1(projected.base)}%`;
+      reason = dn.leader
+        ? `Leads ${comp} by ${f1(r - c)} pts, index ${idx(ch)}, not protected → ${cut}`
+        : `Low return: reach ${f1(r)}% vs ${comp} ${f1(c)}% (index ${idx(ch)}), each reach-point of weight here earns only ~${dn.m0.toFixed(1)} → ${cut}`;
     } else {
       reason = maintainReason({
         ch,
@@ -570,7 +610,7 @@ export function computeScenario(
   };
 }
 
-type StopReason = 'none' | 'donors' | 'benefit' | 'receivers' | 'entry';
+type StopReason = 'none' | 'donors' | 'benefit' | 'receivers' | 'entry' | 'low';
 
 interface NoticeCtx {
   intensity: number;
@@ -587,15 +627,18 @@ interface NoticeCtx {
 function buildNotice(x: NoticeCtx): string | null {
   if (x.intensity === 0) return null;
   if (x.donorCount === 0) {
-    return `Nothing can move: no unprotected channel leads its competitor, so there is no donor weight to release. Lower the threshold (now ${x.threshold}%) to unfreeze leading channels.`;
+    return `Nothing can move: the ${x.threshold}% threshold protects every active channel, so there is no donor weight to release. Lower the threshold.`;
   }
   if (x.receiverCount === 0) {
     return 'Nothing can move: no behind or white-space channel meets the action rules.';
   }
   if (!x.limitedBelowRequest) return null;
-  const asked = `${f1(x.requestedWeight)} reach-pts requested, ${f1(x.movedWeight)} moved`;
+  const asked = `Headroom used up: ${f1(x.movedWeight)} of ${f1(x.requestedWeight)} requested reach-pts moved`;
   if (x.stopReason === 'benefit') {
-    return `${asked}: beyond this point a receiving channel would earn less than 1.15x what the donor gives up, so the engine stops.`;
+    return `${asked}. Beyond this a receiving channel would earn no more reach than the cheapest donor gives up.`;
+  }
+  if (x.stopReason === 'low') {
+    return `${asked}. The next move would lose reach under the pessimistic (low) curve, so it is not recommended.`;
   }
   if (x.stopReason === 'entry') {
     return `${asked}: the next step is a new channel, which needs at least ${f1(P.MIN_ENTRY_REACH)} reach-pts of entry weight to be worth recommending.`;
@@ -660,7 +703,7 @@ function maintainReason(x: MaintainCtx): string {
         ? 'intensity is 0'
         : x.anyDonor
           ? 'extra weight here would earn less reach than the donor channels give up'
-          : 'no unprotected channel leads its competitor, so there is no donor';
+          : 'no unprotected channel can give weight';
     return ch.santoorReach === 0
       ? `White space: ${comp} at ${f1(c)}%, Santoor absent, share ${f1(ch.channelShare)}% → no change (${why})`
       : `Behind ${comp} by ${f1(c - r)} pts, index ${idx(ch)} → no change (${why})`;

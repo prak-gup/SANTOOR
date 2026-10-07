@@ -13,8 +13,6 @@ import {
 import { computeScenario, computeUsefulIntensity, DEFAULT_LEVERS } from './utils/scenario';
 import { MIN_COMP_REF } from './utils/dataAudit';
 import type { MarketKey } from './utils/dataAudit';
-import ScenarioKpis from './components/ScenarioKpis';
-import IndicativeScenarioPanel from './components/IndicativeScenarioPanel';
 import type { ChannelRecord, TimebandMetrics } from './types';
 import TabNavigation from './components/TabNavigation';
 import TimebandHeatmap from './components/TimebandHeatmap';
@@ -400,6 +398,18 @@ export default function App() {
     [enrichedChannels, market, threshold]
   );
 
+  // Results only show once the user has run the optimization for the current market / SCR.
+  const [optimizedKey, setOptimizedKey] = useState<string | null>(null);
+  const isOptimized = optimizedKey === `${market}|${scr}`;
+  const handleOpt = () => setOptimizedKey(`${market}|${scr}`);
+  const shownGap = isOptimized ? scenario.scenario.avgGap : summary.avgGap;
+  const shownStatus = isOptimized ? (shownGap >= 2 ? 'LEADING' : shownGap >= 0 ? 'CLOSE' : shownGap >= -2 ? 'BEHIND' : 'CRITICAL') : summary.status;
+  const signedPts = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(1)}`;
+  const wasLine = (before: number, after: number, dp = 0) =>
+    isOptimized && Number(before.toFixed(dp)) !== Number(after.toFixed(dp)) ? (
+      <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>was {before.toFixed(dp)}</div>
+    ) : null;
+
   const resetLevers = () => {
     setIntensity(DEFAULT_LEVERS.intensity);
     setThreshold(DEFAULT_LEVERS.threshold);
@@ -523,10 +533,11 @@ export default function App() {
         {/* CHANNEL ANALYSIS TAB */}
         {visibleTab === 'channel' && (
           <>
-            {/* LIVE LEVERS */}
+            {/* OPTIMIZATION CONTROLS */}
         <div style={{ marginBottom: '32px' }}>
+          {/* Optimization Panel */}
           <div className="panel">
-            <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <div className="panel-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{
                   fontFamily: 'Outfit, sans-serif',
@@ -534,15 +545,12 @@ export default function App() {
                   fontWeight: 600,
                   color: 'var(--text-primary)'
                 }}>
-                  ⚙️ SCENARIO LEVERS
+                  ⚙️ OPTIMIZATION ENGINE
                 </span>
                 <span className={`signal-badge ${optType === 'ATC' ? 'signal-purple' : 'signal-info'}`}>
-                  {optType === 'ATC' ? 'ATC MARKET' : 'REACH MARKET'}
+                  {optType === 'ATC' ? 'ATC MODE' : 'REACH MODE'}
                 </span>
               </div>
-              <button onClick={resetLevers} className="btn-tactical" aria-label="Reset levers to defaults" title="Restore the default intensity and threshold">
-                ↺ Reset levers
-              </button>
             </div>
             <div className="p-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <div>
@@ -558,20 +566,20 @@ export default function App() {
                     alignItems: 'center',
                     marginBottom: '8px'
                   }}>
-                    INTENSITY: <span style={{ color: 'var(--orange-bright)', fontSize: '14px', marginLeft: '6px' }}>{intensity}%</span>
+                    INTENSITY: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{intensity}%</span>
                     <InfoButton
                       isActive={activeTooltip === 'intensity'}
                       onClick={() => setActiveTooltip(activeTooltip === 'intensity' ? null : 'intensity')}
                     >
                       <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
                         <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
-                          ⚡ INTENSITY
+                          ⚡ OPTIMIZATION INTENSITY
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          Share of the unprotected reach-point weight to reallocate. 0% changes nothing; higher values move more weight from the lowest-return unprotected channels to channels where Santoor trails.
+                          Share of the unprotected reach-point weight that is reallocated. 0% changes nothing.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          The engine only moves weight while a receiving channel earns more reach than a donor gives up (also under the pessimistic curve), so high intensities can plateau once that headroom is used. The notice under the KPIs says when, with the number.
+                          <div>Only moves that still pay off under the pessimistic curve are made, so very high values can plateau.</div>
                         </div>
                       </div>
                     </InfoButton>
@@ -580,7 +588,7 @@ export default function App() {
                     {usefulIntensity < 100 && (
                       <div
                         aria-hidden="true"
-                        title="Beyond the useful range no defensible move remains"
+                        title={`No defensible move remains beyond ${usefulIntensity}%`}
                         style={{
                           position: 'absolute',
                           top: '50%',
@@ -603,17 +611,8 @@ export default function App() {
                       step="5"
                       value={intensity}
                       onChange={e => setIntensity(+e.target.value)}
-                      aria-label="Intensity: percent of unprotected reach-point weight to reallocate"
                       style={{ width: '100%' }}
-                  />
-                  </div>
-                  <div style={{ marginTop: '8px', fontSize: '11px', lineHeight: 1.4, color: 'var(--text-tertiary)', fontFamily: 'DM Mono, monospace' }}
-                       title="Diminishing returns: the engine only moves weight to a channel where it earns more reach than the donor loses, also under the pessimistic curve, and never beyond the per-channel caps. Once those moves are used up, raising intensity changes nothing.">
-                    {usefulIntensity === 0
-                      ? 'No defensible move exists at this threshold under the conservative caps.'
-                      : usefulIntensity >= 100
-                        ? 'Useful range covers the whole slider.'
-                        : `Useful range ends at ${usefulIntensity}% — beyond this no defensible move remains under conservative caps.`}
+                    />
                   </div>
                   <div style={{
                     display: 'flex',
@@ -625,8 +624,8 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em'
                   }}>
-                    <span>No change</span>
-                    <span>Move more</span>
+                    <span>Conservative</span>
+                    <span>Aggressive</span>
                   </div>
                 </div>
               </div>
@@ -644,20 +643,20 @@ export default function App() {
                     alignItems: 'center',
                     marginBottom: '8px'
                   }}>
-                    THRESHOLD: <span style={{ color: 'var(--orange-bright)', fontSize: '14px', marginLeft: '6px' }}>top {threshold}% protected</span>
+                    THRESHOLD: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{threshold}%</span>
                     <InfoButton
                       isActive={activeTooltip === 'threshold'}
                       onClick={() => setActiveTooltip(activeTooltip === 'threshold' ? null : 'threshold')}
                     >
                       <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
                         <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
-                          🎯 THRESHOLD
+                          🎯 OPTIMIZATION THRESHOLD
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          The top X% of Santoor-active channels, ranked by Santoor reach, are frozen before any rule runs. Protected channels are never cut, but can still receive weight where Santoor trails.
+                          Top X% of Santoor channels by reach are frozen first: never cut, but can still receive weight.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          Higher = more channels frozen, fewer donors, fewer changes. Because it counts channels, not weight, a 70% threshold usually freezes 85-95% of the reach-point weight; the default is 30%.
+                          <div>Higher = more channels frozen, fewer donors, fewer changes.</div>
                         </div>
                       </div>
                     </InfoButton>
@@ -669,7 +668,6 @@ export default function App() {
                     step="5"
                     value={threshold}
                     onChange={e => setThreshold(+e.target.value)}
-                    aria-label="Threshold: top percent of Santoor channels by reach that are protected"
                     style={{ width: '100%' }}
                   />
                   <div style={{
@@ -682,20 +680,130 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em'
                   }}>
-                    <span>Nothing frozen</span>
-                    <span>All frozen</span>
+                    <span>More Changes</span>
+                    <span>Fewer</span>
                   </div>
+                </div>
+              </div>
+
+              <div style={{ gridColumn: 'span 2' }}>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button onClick={handleOpt} className="btn-tactical btn-primary" style={{ flex: 1, padding: '16px' }}>
+                    🚀 RUN OPTIMIZATION
+                  </button>
+                  <button onClick={resetLevers} className="btn-tactical" style={{ padding: '16px' }}>
+                    Reset levers
+                  </button>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* LAYER 1: LIVE DECISION KPIs */}
-        <ScenarioKpis scenario={scenario} baseline={summary} statusClasses={STATUS_CLASSES} />
+        {/* METRIC CARDS */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '48px' }}>
+          {/* Metric Cards */}
+          <div className="metric-card" style={{ textAlign: 'center' }}>
+            <div className="metric-label">CHANNELS</div>
+            <div className="metric-value" style={{ color: 'var(--text-primary)' }}>{isOptimized ? scenario.eligibleCount : summary.rel}</div>
+          </div>
 
-        {/* LAYER 2: INDICATIVE, MODELLED */}
-        <IndicativeScenarioPanel scenario={scenario} />
+          <div className="metric-card" style={{ textAlign: 'center' }}>
+            <div className="metric-label">SANTOOR ACTIVE</div>
+            <div className="metric-value" style={{ color: 'var(--orange-bright)' }}>{isOptimized ? scenario.scenario.active : summary.active}</div>
+            {wasLine(summary.active, scenario.scenario.active)}
+          </div>
+
+          <div className="metric-card" style={{ textAlign: 'center' }}>
+            <div className="metric-label">OPPORTUNITIES</div>
+            <div className="metric-value" style={{ color: 'var(--signal-purple)' }}>{isOptimized ? scenario.scenario.whitespace : summary.opp}</div>
+            {wasLine(summary.opp, scenario.scenario.whitespace)}
+          </div>
+
+          <div className="metric-card" style={{ textAlign: 'center' }}>
+            <div className="metric-label">Avg Reach Gap</div>
+            <div className="metric-value" style={{
+              color: shownGap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)'
+            }}>
+              {shownGap >= 0 ? '+' : ''}{shownGap.toFixed(1)}
+            </div>
+            {wasLine(summary.avgGap, scenario.scenario.avgGap, 1)}
+            <div style={{ marginTop: '12px' }}>
+              <span className={STATUS_CLASSES[shownStatus] || 'signal-badge signal-neutral'}>
+                {shownStatus}
+              </span>
+            </div>
+          </div>
+
+          {summary.avgATC !== null && (
+            <div className="metric-card" style={{ textAlign: 'center' }}>
+              <div className="metric-label">AVG ATC INDEX</div>
+              <div className="metric-value" style={{ color: 'var(--signal-purple)' }}>
+                {summary.avgATC.toFixed(1)}
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* OPTIMIZATION RESULTS */}
+        {isOptimized && (
+          <div className="panel mb-6" style={{
+            borderColor: 'var(--orange-bright)',
+            boxShadow: 'var(--glow-orange)'
+          }}>
+            <div className="panel-header">
+              <span style={{
+                fontFamily: 'Outfit, sans-serif',
+                fontSize: '16px',
+                fontWeight: 600,
+                color: 'var(--text-primary)'
+              }}>
+                📊 OPTIMIZATION RESULTS
+              </span>
+            </div>
+            <div className="p-6">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
+                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-positive)' }}>{scenario.counts.INCREASE}</div>
+                  <div className="signal-badge signal-positive" style={{ marginTop: '8px' }}>INCREASE</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-info)' }}>{scenario.counts.MAINTAIN}</div>
+                  <div className="signal-badge signal-info" style={{ marginTop: '8px' }}>MAINTAIN</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-purple)' }}>{scenario.counts.ADD}</div>
+                  <div className="signal-badge signal-purple" style={{ marginTop: '8px' }}>ADD</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-negative)' }}>{scenario.counts.DECREASE}</div>
+                  <div className="signal-badge signal-negative" style={{ marginTop: '8px' }}>DECREASE</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--orange-bright)' }}>{scenario.highPriority}</div>
+                  <div className="signal-badge" style={{
+                    background: 'rgba(255, 107, 0, 0.15)',
+                    color: 'var(--orange-bright)',
+                    borderColor: 'rgba(255, 107, 0, 0.3)',
+                    marginTop: '8px'
+                  }}>
+                    HIGH PRIORITY
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: '16px', fontFamily: 'DM Mono, monospace', fontSize: '11px', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+                Weight moved {(scenario.movedShareUnprotected * 100).toFixed(0)}% of unprotected
+                {scenario.layer2 && scenario.layer2.touchedChannels > 0 && (
+                  <> · Indicative net {signedPts(scenario.layer2.netReachPoints.base)} reach-pts ({signedPts(scenario.layer2.netReachPoints.low)} to {signedPts(scenario.layer2.netReachPoints.high)}), modelled, not a forecast</>
+                )}
+              </div>
+              {scenario.notice && (
+                <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-tertiary)', textAlign: 'center' }}>{scenario.notice}</div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* FILTERS */}
         <div className="panel mb-6">
@@ -758,8 +866,10 @@ export default function App() {
                     { key: 'gap', label: 'GAP' },
                     { key: 'indexVsCompetition', label: 'INDEX' },
                     { key: 'status', label: 'STATUS' },
-                    { key: 'rec', label: 'ACTION' },
-                    { key: 'reason', label: 'REASON' }
+                    ...(isOptimized ? [
+                      { key: 'rec', label: 'ACTION' },
+                      { key: 'reason', label: 'REASON' }
+                    ] : [])
                   ].map(col => (
                     <th
                       key={col.key}
@@ -997,29 +1107,33 @@ export default function App() {
                           {st}
                         </span>
                       </td>
-                      <td>
-                        {opt ? (
-                          <span className={REC_CLASSES[opt.action] || 'signal-badge signal-neutral'}>
-                            {REC_ICONS[opt.action]} {opt.action}
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--text-dim)' }}>—</span>
-                        )}
-                        {opt?.isProtected && (
-                          <span className="signal-badge signal-neutral" style={{ marginLeft: '6px' }}>PROTECTED</span>
-                        )}
-                      </td>
-                      <td style={{
-                        color: 'var(--text-tertiary)',
-                        fontSize: '12px',
-                        minWidth: '260px',
-                        maxWidth: '380px',
-                        whiteSpace: 'normal',
-                        lineHeight: '1.4',
-                        wordBreak: 'break-word'
-                      }}>
-                        {opt?.reason || 'Outside the actionable set (see "Show all"): not part of the scenario.'}
-                      </td>
+                      {isOptimized && (
+                        <>
+                          <td>
+                            {opt ? (
+                              <span className={REC_CLASSES[opt.action] || 'signal-badge signal-neutral'}>
+                                {REC_ICONS[opt.action]} {opt.action}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-dim)' }}>—</span>
+                            )}
+                            {opt?.isProtected && (
+                              <span className="signal-badge signal-neutral" style={{ marginLeft: '6px' }}>PROTECTED</span>
+                            )}
+                          </td>
+                          <td style={{
+                            color: 'var(--text-tertiary)',
+                            fontSize: '12px',
+                            minWidth: '260px',
+                            maxWidth: '380px',
+                            whiteSpace: 'normal',
+                            lineHeight: '1.4',
+                            wordBreak: 'break-word'
+                          }}>
+                            {opt?.reason || '-'}
+                          </td>
+                        </>
+                      )}
                     </tr>
 
                   </>

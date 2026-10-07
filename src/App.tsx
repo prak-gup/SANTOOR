@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import '@fontsource/dm-mono/400.css';
 import '@fontsource/dm-mono/500.css';
 import '@fontsource/outfit/400.css';
@@ -9,8 +9,12 @@ import districtData from './data/up_district_data.json';
 import {
   filterRelevantChannels,
   calculateStatus,
-  runOptimization,
 } from './utils/optimization';
+import { computeScenario, DEFAULT_LEVERS } from './utils/scenario';
+import { MIN_COMP_REF } from './utils/dataAudit';
+import type { MarketKey } from './utils/dataAudit';
+import ScenarioKpis from './components/ScenarioKpis';
+import IndicativeScenarioPanel from './components/IndicativeScenarioPanel';
 import type { ChannelRecord, TimebandMetrics } from './types';
 import TabNavigation from './components/TabNavigation';
 import TimebandHeatmap from './components/TimebandHeatmap';
@@ -40,7 +44,7 @@ interface MarketData {
   competitors: string[];
   optimizationType: string;
   marketShare: Record<string, number>;
-  summaries: Record<string, any>;
+  summaries: Record<string, unknown>;
   channelData: Record<string, ChannelRecord[]>;
 }
 
@@ -83,24 +87,14 @@ interface InfoButtonProps {
 }
 
 function InfoButton({ isActive, onClick, children, position = 'auto' }: InfoButtonProps) {
-  const tooltipRef = useRef<HTMLDivElement>(null);
-  const [tooltipPosition, setTooltipPosition] = useState<'left' | 'right'>('left');
-
-  useEffect(() => {
-    if (isActive && position === 'auto' && tooltipRef.current) {
-      const rect = tooltipRef.current.getBoundingClientRect();
-      const windowWidth = window.innerWidth;
-
-      // Check if tooltip would go off-screen on the right
-      if (rect.right > windowWidth - 20) {
-        setTooltipPosition('right');
-      } else {
-        setTooltipPosition('left');
-      }
-    } else if (position !== 'auto') {
-      setTooltipPosition(position);
+  // In 'auto' mode, flip the tooltip to the right edge when it would overflow the viewport.
+  // Done on mount of the tooltip node, without React state.
+  const positionTooltip = (el: HTMLDivElement | null) => {
+    if (el && position === 'auto' && el.getBoundingClientRect().right > window.innerWidth - 20) {
+      el.style.left = 'auto';
+      el.style.right = '0';
     }
-  }, [isActive, position]);
+  };
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -141,11 +135,11 @@ function InfoButton({ isActive, onClick, children, position = 'auto' }: InfoButt
       </button>
       {isActive && (
         <div
-          ref={tooltipRef}
+          ref={positionTooltip}
           style={{
             position: 'absolute',
             top: '24px',
-            ...(tooltipPosition === 'right' ? { right: '0' } : { left: '0' }),
+            ...(position === 'right' ? { right: '0' } : { left: '0' }),
             zIndex: 1000,
             background: 'var(--surface-1)',
             border: '2px solid var(--orange-bright)',
@@ -168,6 +162,31 @@ function InfoButton({ isActive, onClick, children, position = 'auto' }: InfoButt
     </div>
   );
 }
+
+
+const SAMPLE_BANNER_STYLE: React.CSSProperties = {
+  padding: '12px 16px',
+  marginBottom: '16px',
+  borderRadius: '8px',
+  border: '1px solid var(--signal-warning)',
+  background: 'var(--surface-2)',
+  color: 'var(--signal-warning)',
+  fontFamily: 'DM Mono, monospace',
+  fontSize: '12px',
+  fontWeight: 600,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+};
+
+function SampleDataBanner() {
+  return (
+    <div role="alert" style={SAMPLE_BANNER_STYLE}>
+      Illustrative sample data: timeband figures are generated, not measured. Do not use in client material.
+    </div>
+  );
+}
+
+type SortableRow = Record<string, number | string | undefined>;
 
 // Market display names
 const MARKET_DISPLAY_NAMES: Record<MarketName, string> = {
@@ -208,46 +227,43 @@ export default function App() {
     return 'Maharashtra';
   };
   const [market, setMarket] = useState<MarketName>(getInitialMarket());
-  const [scr, setSCR] = useState<string>('Maharashtra Overall');
-  const [intensity, setIntensity] = useState<number>(15);
-  const [threshold, setThreshold] = useState<number>(70);
-  const [isOptimized, setIsOptimized] = useState<boolean>(false);
-  const [results, setResults] = useState<Map<string, any>>(new Map());
+  const [scr, setSCR] = useState<string>(() => `${getInitialMarket()} Overall`);
+  const [intensity, setIntensity] = useState<number>(DEFAULT_LEVERS.intensity);
+  const [threshold, setThreshold] = useState<number>(DEFAULT_LEVERS.threshold);
   const [showAll, setShowAll] = useState<boolean>(false);
   const [genre, setGenre] = useState<string>('All');
   const [search, setSearch] = useState<string>('');
   const [sortCol, setSortCol] = useState<string>('santoorReach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
-  const prevOptimizedRef = useRef(false);
+
+  // Timeband data is synthetic (generateSampleTimebandData). It is only reachable with ?debug=1.
+  const [debug] = useState<boolean>(() => new URLSearchParams(window.location.search).get('debug') === '1');
 
   // Timeband state (only for timeband tab)
-  const [selectedTimeband, _setSelectedTimeband] = useState<string>('all');
+  const [selectedTimeband] = useState<string>('all');
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
   const [heatmapMetric, setHeatmapMetric] = useState<'reach' | 'gap' | 'atcIndex'>('reach');
   const [selectedChannelForInsights, setSelectedChannelForInsights] = useState<string | null>(null);
 
   const marketData = santoorData.markets[market];
-  const scrs = marketData?.scrs || [];
+  const scrs = useMemo(() => marketData?.scrs || [], [marketData]);
   const competitors = marketData?.competitors || [];
   const optType = marketData?.optimizationType || 'Reach';
-  const rawChannels: ChannelRecord[] = filterChannelsForMarket(
-    marketData?.channelData[scr] || [],
-    market as 'UP' | 'Maharashtra' | 'Karnataka'
+  const rawChannels = useMemo<ChannelRecord[]>(
+    () => filterChannelsForMarket(marketData?.channelData[scr] || [], market as MarketKey),
+    [marketData, scr, market]
   );
 
-  // Enrich channels with timeband data (using sample data for now)
+  // All channels of the selected market / SCR. Timeband enrichment is synthetic sample data,
+  // so it is only attached in debug mode.
   const enrichedChannels = useMemo(() => {
+    if (!debug) return rawChannels;
     return rawChannels.map(channel => {
-      if (channel.timebands && channel.timebands.length > 0) {
-        // Already has timeband data
-        return channel;
-      }
-      // Generate sample timeband data
-      const sampleTimebands = generateSampleTimebandData(channel, market);
-      return enrichChannelWithTimebands(channel, sampleTimebands);
+      if (channel.timebands && channel.timebands.length > 0) return channel;
+      return enrichChannelWithTimebands(channel, generateSampleTimebandData(channel, market));
     });
-  }, [rawChannels, market]);
+  }, [rawChannels, market, debug]);
 
   // Update URL when market changes
   useEffect(() => {
@@ -258,23 +274,20 @@ export default function App() {
     window.history.pushState({}, '', newUrl);
   }, [market]);
 
-  useEffect(() => { setIsOptimized(false); setResults(new Map()); }, [market, scr]);
-  useEffect(() => {
-    const def = `${market} Overall`;
-    if (scrs.includes(def)) setSCR(def);
-    else if (scrs.length > 0) setSCR(scrs[0]);
-  }, [market, scrs]);
-
-  // Reset district tab when switching away from UP
-  useEffect(() => {
-    if (market !== 'UP' && activeTab === 'district') {
-      setActiveTab('channel');
-    }
-    if (market !== 'UP') {
+  // Switching market resets the SCR, drops UP-only district state and falls back from tabs that do not apply.
+  const handleMarketChange = (next: MarketName) => {
+    const nextScrs = santoorData.markets[next]?.scrs || [];
+    const def = `${next} Overall`;
+    setMarket(next);
+    setSCR(nextScrs.includes(def) ? def : nextScrs[0] ?? '');
+    if (next !== 'UP') {
       setSelectedDistrictSer(null);
       setSelectedDistrict(null);
+      if (activeTab === 'district') setActiveTab('channel');
     }
-  }, [market, activeTab]);
+  };
+  const visibleTab: 'channel' | 'timeband' | 'district' =
+    (activeTab === 'timeband' && !debug) || (activeTab === 'district' && market !== 'UP') ? 'channel' : activeTab;
 
   // District-level computation
   const districtComputed = useMemo(() => {
@@ -291,7 +304,7 @@ export default function App() {
 
     // Enrich SER channels with timeband data first
     const enrichedSerChannels = serChannelData.map(channel => {
-      if (channel.timebands && channel.timebands.length > 0) return channel;
+      if (!debug || (channel.timebands && channel.timebands.length > 0)) return channel;
       const sampleTimebands = generateSampleTimebandData(channel, 'UP');
       return enrichChannelWithTimebands(channel, sampleTimebands);
     });
@@ -304,7 +317,7 @@ export default function App() {
     const filtered = filterRelevantChannels(districtChannels, 'actionable') as ChannelRecord[];
 
     return { district, districtChannels, filtered, summary };
-  }, [market, selectedDistrictSer, selectedDistrict, allDistricts]);
+  }, [market, selectedDistrictSer, selectedDistrict, allDistricts, debug]);
 
   const genres = useMemo(() => ['All', ...new Set(enrichedChannels.map(c => c.genre))], [enrichedChannels]);
 
@@ -323,21 +336,10 @@ export default function App() {
     }
 
     return [...filtered].sort((a, b) => {
-      const aV = (a as any)[sortCol] ?? 0, bV = (b as any)[sortCol] ?? 0;
+      const aV = (a as unknown as SortableRow)[sortCol] ?? 0, bV = (b as unknown as SortableRow)[sortCol] ?? 0;
       return sortDir === 'asc' ? (aV > bV ? 1 : -1) : (aV < bV ? 1 : -1);
     });
   }, [enrichedChannels, showAll, genre, search, sortCol, sortDir, selectedTimeband, activeTab]);
-
-  useEffect(() => {
-    if (prevOptimizedRef.current && displayChannels.length > 0) {
-      const optimizationResults = runOptimization(displayChannels, intensity, threshold);
-      setResults(optimizationResults);
-    }
-  }, [intensity, threshold, displayChannels]);
-
-  useEffect(() => {
-    prevOptimizedRef.current = isOptimized;
-  }, [isOptimized]);
 
   // Close tooltip when clicking outside
   useEffect(() => {
@@ -358,31 +360,22 @@ export default function App() {
   const propensityMetrics = useMemo(() => {
     if (market !== 'Karnataka') return null;
 
-    const channelsWithATC = enrichedChannels.filter(c => (c as any).atcIndex && c.santoorReach > 0);
+    const channelsWithATC = enrichedChannels.filter(c => c.atcIndex && c.santoorReach > 0);
     if (channelsWithATC.length === 0) return null;
 
-    const maxAtcIndex = Math.max(...channelsWithATC.map(c => (c as any).atcIndex || 0));
-    const totalWeightedATC = channelsWithATC.reduce((sum, c) => sum + ((c as any).atcIndex || 0) * c.santoorReach, 0);
+    const maxAtcIndex = Math.max(...channelsWithATC.map(c => c.atcIndex || 0));
+    const totalWeightedATC = channelsWithATC.reduce((sum, c) => sum + (c.atcIndex || 0) * c.santoorReach, 0);
 
     return { maxAtcIndex, totalWeightedATC };
   }, [enrichedChannels, market]);
 
+  // Observed baselines. These never depend on the levers.
   const summary = useMemo(() => {
     const rel = filterRelevantChannels(enrichedChannels);
     const withS = rel.filter(c => c.santoorReach > 0);
     const opp = rel.filter(c => c.santoorReach === 0 && c.maxCompReach >= 2.0 && c.channelShare >= 1.0);
     const avgGap = withS.length ? withS.reduce((s, c) => s + c.gap, 0) / withS.length : 0;
-    const avgATC = market === 'Karnataka' && withS.length ? withS.reduce((s, c) => s + ((c as any).atcIndex || 0), 0) / withS.length : null;
-
-    // Calculate primetime metrics
-    const channelsWithTimebands = enrichedChannels.filter(c => c.primetimeReach !== undefined);
-    const avgPrimetimeReach = channelsWithTimebands.length > 0
-      ? channelsWithTimebands.reduce((s, c) => s + (c.primetimeReach || 0), 0) / channelsWithTimebands.length
-      : 0;
-    const avgNonPrimetimeReach = channelsWithTimebands.length > 0
-      ? channelsWithTimebands.reduce((s, c) => s + (c.nonPrimetimeReach || 0), 0) / channelsWithTimebands.length
-      : 0;
-
+    const avgATC = market === 'Karnataka' && withS.length ? withS.reduce((s, c) => s + (c.atcIndex || 0), 0) / withS.length : null;
     return {
       total: enrichedChannels.length,
       rel: rel.length,
@@ -390,47 +383,20 @@ export default function App() {
       opp: opp.length,
       avgGap,
       avgATC,
-      avgPrimetimeReach,
-      avgNonPrimetimeReach,
-      primeVsNonPrime: avgNonPrimetimeReach > 0 ? avgPrimetimeReach / avgNonPrimetimeReach : 0,
       status: avgGap >= 2 ? 'LEADING' : avgGap >= 0 ? 'CLOSE' : avgGap >= -2 ? 'BEHIND' : 'CRITICAL'
     };
   }, [enrichedChannels, market]);
 
-  // Calculate timeband stats for selector (currently unused but kept for future use)
-  // const timebandStats = useMemo(() => {
-  //   const stats: Record<string, { reach: number; isPrime: boolean }> = {};
-  //
-  //   for (const timeband of TIMEBAND_LABELS) {
-  //     const isPrime = timeband === '17:00-20:00' || timeband === '20:00-23:00';
-  //     const channelsWithTimeband = enrichedChannels.filter(c => c.timebands);
-  //     const totalReach = channelsWithTimeband.reduce((sum, c) => {
-  //       const tb = c.timebands?.find((t: TimebandMetrics) => t.timeband === timeband);
-  //       return sum + (tb?.santoorReach || 0);
-  //     }, 0);
-  //     const avgReach = channelsWithTimeband.length > 0 ? totalReach / channelsWithTimeband.length : 0;
-  //
-  //     stats[timeband] = { reach: avgReach, isPrime };
-  //   }
-  //
-  //   return stats;
-  // }, [enrichedChannels]);
+  // Everything the levers drive, derived from ALL channels of the market / SCR.
+  // Search, genre, sort and "show all" only change the table, never these numbers.
+  const scenario = useMemo(
+    () => computeScenario(enrichedChannels, market as MarketKey, { intensity, threshold }),
+    [enrichedChannels, market, intensity, threshold]
+  );
 
-  const optSum = useMemo(() => {
-    const arr = [...results.values()];
-    return {
-      inc: arr.filter(r => r.recommendation === 'INCREASE').length,
-      mnt: arr.filter(r => r.recommendation === 'MAINTAIN').length,
-      add: arr.filter(r => r.recommendation === 'ADD').length,
-      dec: arr.filter(r => r.recommendation === 'DECREASE').length,
-      hi: arr.filter(r => r.priority === 'HIGH').length
-    };
-  }, [results]);
-
-  const handleOpt = () => {
-    const optimizationResults = runOptimization(displayChannels, intensity, threshold);
-    setResults(optimizationResults);
-    setIsOptimized(true);
+  const resetLevers = () => {
+    setIntensity(DEFAULT_LEVERS.intensity);
+    setThreshold(DEFAULT_LEVERS.threshold);
   };
 
   const handleSort = (col: string) => {
@@ -518,7 +484,7 @@ export default function App() {
                 </label>
                 <select
                   value={market}
-                  onChange={e => setMarket(e.target.value as MarketName)}
+                  onChange={e => handleMarketChange(e.target.value as MarketName)}
                   style={{ minWidth: '180px' }}
                 >
                   {santoorData.metadata.markets.map(m => <option key={m} value={m}>{MARKET_DISPLAY_NAMES[m as MarketName]}</option>)}
@@ -542,19 +508,19 @@ export default function App() {
 
         {/* TAB NAVIGATION */}
         <TabNavigation
-          activeTab={activeTab}
+          activeTab={visibleTab}
           onTabChange={setActiveTab}
           showDistrictTab={market === 'UP'}
+          showTimebandTab={debug}
         />
 
         {/* CHANNEL ANALYSIS TAB */}
-        {activeTab === 'channel' && (
+        {visibleTab === 'channel' && (
           <>
-            {/* OPTIMIZATION CONTROLS */}
+            {/* LIVE LEVERS */}
         <div style={{ marginBottom: '32px' }}>
-          {/* Optimization Panel */}
           <div className="panel">
-            <div className="panel-header">
+            <div className="panel-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{
                   fontFamily: 'Outfit, sans-serif',
@@ -562,12 +528,15 @@ export default function App() {
                   fontWeight: 600,
                   color: 'var(--text-primary)'
                 }}>
-                  ⚙️ OPTIMIZATION ENGINE
+                  ⚙️ SCENARIO LEVERS
                 </span>
                 <span className={`signal-badge ${optType === 'ATC' ? 'signal-purple' : 'signal-info'}`}>
-                  {optType === 'ATC' ? 'ATC MODE' : 'REACH MODE'}
+                  {optType === 'ATC' ? 'ATC MARKET' : 'REACH MARKET'}
                 </span>
               </div>
+              <button onClick={resetLevers} className="btn-tactical">
+                ↺ RESET LEVERS
+              </button>
             </div>
             <div className="p-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
               <div>
@@ -583,32 +552,32 @@ export default function App() {
                     alignItems: 'center',
                     marginBottom: '8px'
                   }}>
-                    INTENSITY: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{intensity}%</span>
+                    INTENSITY: <span style={{ color: 'var(--orange-bright)', fontSize: '14px', marginLeft: '6px' }}>{intensity}%</span>
                     <InfoButton
                       isActive={activeTooltip === 'intensity'}
                       onClick={() => setActiveTooltip(activeTooltip === 'intensity' ? null : 'intensity')}
                     >
                       <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
                         <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
-                          ⚡ OPTIMIZATION INTENSITY
+                          ⚡ INTENSITY
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          Controls how aggressively the optimizer suggests changes to your channel mix.
+                          Share of the unprotected reach-point weight to reallocate. 0% changes nothing; higher values move more weight from leading channels to channels where Santoor trails.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          <div style={{ marginBottom: '4px' }}>• <strong>Lower (5-10%)</strong>: Conservative, minimal changes</div>
-                          <div style={{ marginBottom: '4px' }}>• <strong>Medium (10-20%)</strong>: Balanced reallocation</div>
-                          <div>• <strong>Higher (20-30%)</strong>: Aggressive optimization</div>
+                          The engine only moves weight while a receiving channel earns at least 1.15x what a donor gives up, so very high intensities can plateau. The notice under the KPIs says when that happens.
                         </div>
                       </div>
                     </InfoButton>
                   </label>
                   <input
                     type="range"
-                    min="5"
-                    max="30"
+                    min="0"
+                    max="100"
+                    step="5"
                     value={intensity}
                     onChange={e => setIntensity(+e.target.value)}
+                    aria-label="Intensity: percent of unprotected reach-point weight to reallocate"
                     style={{ width: '100%' }}
                   />
                   <div style={{
@@ -621,8 +590,8 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em'
                   }}>
-                    <span>Conservative</span>
-                    <span>Aggressive</span>
+                    <span>No change</span>
+                    <span>Move more</span>
                   </div>
                 </div>
               </div>
@@ -640,33 +609,32 @@ export default function App() {
                     alignItems: 'center',
                     marginBottom: '8px'
                   }}>
-                    THRESHOLD: <span style={{ color: 'var(--orange-bright)', fontSize: '14px' }}>{threshold}%</span>
+                    THRESHOLD: <span style={{ color: 'var(--orange-bright)', fontSize: '14px', marginLeft: '6px' }}>top {threshold}% protected</span>
                     <InfoButton
                       isActive={activeTooltip === 'threshold'}
                       onClick={() => setActiveTooltip(activeTooltip === 'threshold' ? null : 'threshold')}
                     >
                       <div style={{ fontFamily: 'DM Mono, monospace', color: 'var(--text-primary)' }}>
                         <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--orange-bright)', fontSize: '12px' }}>
-                          🎯 OPTIMIZATION THRESHOLD
+                          🎯 THRESHOLD
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          Sets the minimum index threshold for generating recommendations.
+                          The top X% of Santoor-active channels, ranked by Santoor reach, are frozen before any rule runs. Protected channels are never cut, but can still receive weight where Santoor trails.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          <div style={{ marginBottom: '4px' }}>• <strong>Lower (50-60%)</strong>: More comprehensive, includes weaker channels</div>
-                          <div style={{ marginBottom: '4px' }}>• <strong>Medium (65-75%)</strong>: Balanced approach</div>
-                          <div>• <strong>Higher (80-90%)</strong>: Selective, only top-performing channels</div>
+                          Higher = more channels frozen, fewer donors, fewer changes. Because it counts channels, not weight, even a 70% threshold usually freezes 85-95% of the reach-point weight.
                         </div>
                       </div>
                     </InfoButton>
                   </label>
                   <input
                     type="range"
-                    min="50"
-                    max="90"
+                    min="0"
+                    max="100"
                     step="5"
                     value={threshold}
                     onChange={e => setThreshold(+e.target.value)}
+                    aria-label="Threshold: top percent of Santoor channels by reach that are protected"
                     style={{ width: '100%' }}
                   />
                   <div style={{
@@ -679,113 +647,20 @@ export default function App() {
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em'
                   }}>
-                    <span>More Changes</span>
-                    <span>Fewer</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ gridColumn: 'span 2' }}>
-                <button onClick={handleOpt} className="btn-tactical btn-primary" style={{ width: '100%', padding: '16px' }}>
-                  🚀 RUN OPTIMIZATION
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* METRIC CARDS */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '20px', marginBottom: '48px' }}>
-          {/* Metric Cards */}
-          <div className="metric-card" style={{ textAlign: 'center' }}>
-            <div className="metric-label">CHANNELS</div>
-            <div className="metric-value" style={{ color: 'var(--text-primary)' }}>{summary.rel}</div>
-          </div>
-
-          <div className="metric-card" style={{ textAlign: 'center' }}>
-            <div className="metric-label">SANTOOR ACTIVE</div>
-            <div className="metric-value" style={{ color: 'var(--orange-bright)' }}>{summary.active}</div>
-          </div>
-
-          <div className="metric-card" style={{ textAlign: 'center' }}>
-            <div className="metric-label">OPPORTUNITIES</div>
-            <div className="metric-value" style={{ color: 'var(--signal-purple)' }}>{summary.opp}</div>
-          </div>
-
-          <div className="metric-card" style={{ textAlign: 'center' }}>
-            <div className="metric-label">Avg Reach Gap</div>
-            <div className="metric-value" style={{
-              color: summary.avgGap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)'
-            }}>
-              {summary.avgGap >= 0 ? '+' : ''}{summary.avgGap.toFixed(1)}
-            </div>
-            <div style={{ marginTop: '12px' }}>
-              <span className={STATUS_CLASSES[summary.status] || 'signal-badge signal-neutral'}>
-                {summary.status}
-              </span>
-            </div>
-          </div>
-
-          {summary.avgATC !== null && (
-            <div className="metric-card" style={{ textAlign: 'center' }}>
-              <div className="metric-label">AVG ATC INDEX</div>
-              <div className="metric-value" style={{ color: 'var(--signal-purple)' }}>
-                {summary.avgATC.toFixed(1)}
-              </div>
-            </div>
-          )}
-
-        </div>
-
-        {/* OPTIMIZATION RESULTS */}
-        {isOptimized && (
-          <div className="panel mb-6" style={{
-            borderColor: 'var(--orange-bright)',
-            boxShadow: 'var(--glow-orange)'
-          }}>
-            <div className="panel-header">
-              <span style={{
-                fontFamily: 'Outfit, sans-serif',
-                fontSize: '16px',
-                fontWeight: 600,
-                color: 'var(--text-primary)'
-              }}>
-                📊 OPTIMIZATION RESULTS
-              </span>
-            </div>
-            <div className="p-6">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
-                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-positive)' }}>{optSum.inc}</div>
-                  <div className="signal-badge signal-positive" style={{ marginTop: '8px' }}>INCREASE</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-info)' }}>{optSum.mnt}</div>
-                  <div className="signal-badge signal-info" style={{ marginTop: '8px' }}>MAINTAIN</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-purple)' }}>{optSum.add}</div>
-                  <div className="signal-badge signal-purple" style={{ marginTop: '8px' }}>ADD</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--signal-negative)' }}>{optSum.dec}</div>
-                  <div className="signal-badge signal-negative" style={{ marginTop: '8px' }}>DECREASE</div>
-                </div>
-                <div style={{ textAlign: 'center', padding: '16px', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '28px', fontWeight: 700, color: 'var(--orange-bright)' }}>{optSum.hi}</div>
-                  <div className="signal-badge" style={{
-                    background: 'rgba(255, 107, 0, 0.15)',
-                    color: 'var(--orange-bright)',
-                    borderColor: 'rgba(255, 107, 0, 0.3)',
-                    marginTop: '8px'
-                  }}>
-                    HIGH PRIORITY
+                    <span>Nothing frozen</span>
+                    <span>All frozen</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        )}
+        </div>
+
+        {/* LAYER 1: LIVE DECISION KPIs */}
+        <ScenarioKpis scenario={scenario} baseline={summary} statusClasses={STATUS_CLASSES} />
+
+        {/* LAYER 2: INDICATIVE, MODELLED */}
+        <IndicativeScenarioPanel scenario={scenario} />
 
         {/* FILTERS */}
         <div className="panel mb-6">
@@ -848,10 +723,8 @@ export default function App() {
                     { key: 'gap', label: 'GAP' },
                     { key: 'indexVsCompetition', label: 'INDEX' },
                     { key: 'status', label: 'STATUS' },
-                    ...(isOptimized ? [
-                      { key: 'rec', label: 'ACTION' },
-                      { key: 'reason', label: 'REASON' }
-                    ] : [])
+                    { key: 'rec', label: 'ACTION' },
+                    { key: 'reason', label: 'REASON' }
                   ].map(col => (
                     <th
                       key={col.key}
@@ -1028,7 +901,7 @@ export default function App() {
               <tbody>
                 {displayChannels.map((ch, i) => {
                   const st = calculateStatus(ch);
-                  const opt = results.get(ch.channel);
+                  const opt = scenario.outcomes.get(ch.channel);
 
                   return (
                     <>
@@ -1051,8 +924,8 @@ export default function App() {
                         <>
                           <td style={{ textAlign: 'right' }}>
                             {(() => {
-                              if (!propensityMetrics || !(ch as any).atcIndex) return '-';
-                              const propensity = Math.min(100, ((ch as any).atcIndex / propensityMetrics.maxAtcIndex) * 100);
+                              if (!propensityMetrics || !ch.atcIndex) return '-';
+                              const propensity = Math.min(100, (ch.atcIndex / propensityMetrics.maxAtcIndex) * 100);
                               const color = propensity >= 70 ? 'var(--signal-positive)' : propensity >= 40 ? 'var(--signal-warning)' : 'var(--signal-negative)';
                               return (
                                 <span style={{ color, fontWeight: 600 }}>
@@ -1063,8 +936,8 @@ export default function App() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {(() => {
-                              if (!propensityMetrics || !(ch as any).atcIndex || ch.santoorReach === 0) return '-';
-                              const contribution = ((ch as any).atcIndex * ch.santoorReach) / propensityMetrics.totalWeightedATC * 100;
+                              if (!propensityMetrics || !ch.atcIndex || ch.santoorReach === 0) return '-';
+                              const contribution = (ch.atcIndex * ch.santoorReach) / propensityMetrics.totalWeightedATC * 100;
                               return (
                                 <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
                                   {contribution.toFixed(1)}%
@@ -1082,210 +955,38 @@ export default function App() {
                         {ch.gap >= 0 ? '+' : ''}{ch.gap.toFixed(1)}
                       </td>
                       <td style={{ textAlign: 'right' }}>
-                        {(ch as any).indexVsCompetition?.toFixed(0) || '-'}
+                        {ch.maxCompReach >= MIN_COMP_REF ? ch.indexVsCompetition.toFixed(0) : 'n/a'}
                       </td>
                       <td>
                         <span className={STATUS_CLASSES[st] || 'signal-badge signal-neutral'}>
                           {st}
                         </span>
                       </td>
-                      {isOptimized && (
-                        <>
-                          <td>
-                            {opt && (
-                              <span className={REC_CLASSES[opt.recommendation] || 'signal-badge signal-neutral'}>
-                                {REC_ICONS[opt.recommendation]} {opt.recommendation}
-                              </span>
-                            )}
-                          </td>
-                          <td style={{
-                            color: 'var(--text-tertiary)',
-                            fontSize: '12px',
-                            maxWidth: '250px',
-                            whiteSpace: 'normal',
-                            lineHeight: '1.4',
-                            wordBreak: 'break-word'
-                          }}>
-                            {opt?.reason || '-'}
-                          </td>
-                        </>
-                      )}
+                      <td>
+                        {opt ? (
+                          <span className={REC_CLASSES[opt.action] || 'signal-badge signal-neutral'}>
+                            {REC_ICONS[opt.action]} {opt.action}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-dim)' }}>—</span>
+                        )}
+                        {opt?.isProtected && (
+                          <span className="signal-badge signal-neutral" style={{ marginLeft: '6px' }}>PROTECTED</span>
+                        )}
+                      </td>
+                      <td style={{
+                        color: 'var(--text-tertiary)',
+                        fontSize: '12px',
+                        minWidth: '260px',
+                        maxWidth: '380px',
+                        whiteSpace: 'normal',
+                        lineHeight: '1.4',
+                        wordBreak: 'break-word'
+                      }}>
+                        {opt?.reason || 'Outside the actionable set (see "Show all"): not part of the scenario.'}
+                      </td>
                     </tr>
 
-                    {/* No expandable rows in channel tab - moved to timeband tab */}
-                    {false && (
-                      <tr key={`${i}-expanded`}>
-                        <td colSpan={isOptimized ? (market === 'Karnataka' ? 13 : 10) : (market === 'Karnataka' ? 11 : 8)} style={{ padding: 0, background: 'var(--surface-1)' }}>
-                          <div style={{
-                            padding: '24px',
-                            borderTop: '2px solid var(--border)',
-                            borderBottom: '2px solid var(--border)'
-                          }}>
-                            <h4 style={{
-                              fontFamily: 'Outfit, sans-serif',
-                              fontSize: '14px',
-                              fontWeight: 600,
-                              color: 'var(--text-primary)',
-                              marginBottom: '16px'
-                            }}>
-                              📊 Timeband Breakdown: {ch.channel}
-                            </h4>
-
-                            <div style={{ overflowX: 'auto' }}>
-                              <table className="data-table" style={{ fontSize: '11px' }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ fontSize: '10px' }}>TIMEBAND</th>
-                                    <th style={{ fontSize: '10px' }}>SANTOOR</th>
-                                    <th style={{ fontSize: '10px' }}>COMPETITOR</th>
-                                    <th style={{ fontSize: '10px' }}>GAP</th>
-                                    <th style={{ fontSize: '10px' }}>SHARE</th>
-                                    <th style={{ fontSize: '10px' }}>STATUS</th>
-                                    <th style={{ fontSize: '10px' }}>ACTION</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {ch.timebands?.map((tb: TimebandMetrics, tbIdx: number) => (
-                                    <tr
-                                      key={tbIdx}
-                                      style={{
-                                        background: tb.isPrimetime ? 'rgba(255, 107, 0, 0.04)' : 'transparent',
-                                        borderLeft: tb.isPrimetime ? '3px solid var(--orange-bright)' : '3px solid transparent'
-                                      }}
-                                    >
-                                      <td style={{
-                                        fontFamily: 'DM Mono, monospace',
-                                        fontWeight: 500,
-                                        color: 'var(--text-primary)'
-                                      }}>
-                                        {TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband}
-                                      </td>
-                                      <td style={{
-                                        fontWeight: 600,
-                                        color: 'var(--orange-bright)',
-                                        textAlign: 'right'
-                                      }}>
-                                        {tb.santoorReach.toFixed(1)}%
-                                      </td>
-                                      <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
-                                        {tb.maxCompReach.toFixed(1)}%
-                                      </td>
-                                      <td style={{
-                                        fontWeight: 600,
-                                        color: tb.gap >= 0 ? 'var(--signal-positive)' : 'var(--signal-negative)',
-                                        textAlign: 'right'
-                                      }}>
-                                        {tb.gap >= 0 ? '+' : ''}{tb.gap.toFixed(1)}
-                                      </td>
-                                      <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
-                                        {tb.santoorShare.toFixed(1)}%
-                                      </td>
-                                      <td>
-                                        <span className={STATUS_CLASSES[getTimebandStatus(tb)] || 'signal-badge signal-neutral'}>
-                                          {getTimebandStatus(tb)}
-                                        </span>
-                                      </td>
-                                      <td>
-                                        <span className={REC_CLASSES[getTimebandRecommendation(tb)] || 'signal-badge signal-neutral'}>
-                                          {REC_ICONS[getTimebandRecommendation(tb)]} {getTimebandRecommendation(tb)}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-
-                            {/* Timeband Summary */}
-                            <div style={{
-                              marginTop: '16px',
-                              display: 'grid',
-                              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                              gap: '12px'
-                            }}>
-                              <div style={{
-                                padding: '12px',
-                                background: 'var(--surface-2)',
-                                borderRadius: '6px',
-                                border: '1px solid var(--border)'
-                              }}>
-                                <div style={{
-                                  fontSize: '9px',
-                                  textTransform: 'uppercase',
-                                  color: 'var(--text-tertiary)',
-                                  marginBottom: '4px'
-                                }}>
-                                  Peak Timeband
-                                </div>
-                                <div style={{
-                                  fontFamily: 'DM Mono, monospace',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: 'var(--orange-bright)'
-                                }}>
-                                  {ch.peakTimeband || 'N/A'}
-                                </div>
-                              </div>
-
-                              <div style={{
-                                padding: '12px',
-                                background: 'var(--surface-2)',
-                                borderRadius: '6px',
-                                border: '1px solid var(--border)'
-                              }}>
-                                <div style={{
-                                  fontSize: '9px',
-                                  textTransform: 'uppercase',
-                                  color: 'var(--text-tertiary)',
-                                  marginBottom: '4px'
-                                }}>
-                                  Primetime Reach
-                                </div>
-                                <div style={{
-                                  fontFamily: 'DM Mono, monospace',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: 'var(--signal-positive)'
-                                }}>
-                                  {(ch.primetimeReach || 0).toFixed(1)}%
-                                </div>
-                              </div>
-
-                              <div style={{
-                                padding: '12px',
-                                background: 'var(--surface-2)',
-                                borderRadius: '6px',
-                                border: '1px solid var(--border)'
-                              }}>
-                                <div style={{
-                                  fontSize: '9px',
-                                  textTransform: 'uppercase',
-                                  color: 'var(--text-tertiary)',
-                                  marginBottom: '4px'
-                                }}>
-                                  Prime Advantage
-                                </div>
-                                <div style={{
-                                  fontFamily: 'DM Mono, monospace',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: 'var(--text-primary)'
-                                }}>
-                                  {(() => {
-                                    const primeReach = ch.primetimeReach ?? 0;
-                                    const nonPrimeReach = ch.nonPrimetimeReach ?? 0;
-                                    if (nonPrimeReach > 0) {
-                                      return `${(primeReach / nonPrimeReach).toFixed(2)}x`;
-                                    }
-                                    return 'N/A';
-                                  })()}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </>
                   );
                 })}
@@ -1297,8 +998,9 @@ export default function App() {
         )}
 
         {/* TIMEBAND ANALYSIS TAB */}
-        {activeTab === 'timeband' && (
+        {visibleTab === 'timeband' && (
           <>
+            <SampleDataBanner />
             {/* HEATMAP METRIC SELECTOR */}
             <div className="panel" style={{ marginBottom: '16px' }}>
               <div className="p-4" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -1561,7 +1263,7 @@ export default function App() {
             {selectedChannelForInsights && (() => {
               const channel = displayChannels.find(ch => ch.channel === selectedChannelForInsights);
               if (channel && channel.timebands) {
-                const insights = generateSimplifiedInsights(channel, market, enrichedChannels);
+                const insights = generateSimplifiedInsights(channel);
                 return (
                   <div
                     style={{
@@ -1636,7 +1338,7 @@ export default function App() {
         )}
 
         {/* DISTRICT ANALYSIS TAB */}
-        {activeTab === 'district' && market === 'UP' && (
+        {visibleTab === 'district' && (
           <>
             {/* DISTRICT SELECTOR */}
             <DistrictSelector
@@ -1691,7 +1393,8 @@ export default function App() {
                   summary={districtComputed.summary}
                 />
 
-                {/* SUB-TAB TOGGLE: Channels | Timebands */}
+                {/* SUB-TAB TOGGLE: Channels | Timebands (timebands are sample data: debug only) */}
+                {debug && (
                 <div className="panel" style={{ marginBottom: '24px' }}>
                   <div className="p-3" style={{ display: 'flex', gap: '0' }}>
                     {(['channels', 'timebands'] as const).map(st => (
@@ -1719,6 +1422,7 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+                )}
 
                 {/* CHANNELS SUB-TAB */}
                 {districtSubTab === 'channels' && (
@@ -1782,8 +1486,9 @@ export default function App() {
                 )}
 
                 {/* TIMEBANDS SUB-TAB */}
-                {districtSubTab === 'timebands' && (
+                {debug && districtSubTab === 'timebands' && (
                   <>
+                    <SampleDataBanner />
                     <div className="panel" style={{ marginBottom: '32px' }}>
                       <div className="panel-header">
                         <span style={{

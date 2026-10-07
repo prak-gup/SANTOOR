@@ -423,7 +423,7 @@ describe('engine behaviour on a controlled region', () => {
       for (const o of s.outcomes.values()) {
         if (Math.max(o.reach, o.competitorReach) >= 1.0) {
           checked++;
-          for (const f of o.flags) expect(['NO_COMPETITOR_REF', 'HIGH_REACH']).toContain(f);
+          for (const f of o.flags) expect(['NO_COMPETITOR_REF', 'IMPOSSIBLE_REACH']).toContain(f);
           expect(o.reason).not.toMatch(/language/i);
         }
       }
@@ -446,10 +446,10 @@ describe('engine behaviour on a controlled region', () => {
     expect(s.movedWeight).toBeGreaterThan(1);
   });
 
-  it('holds a channel with no usable competitor reference and one above 40% reach', () => {
+  it('holds a channel with no usable competitor reference and one with impossible reach', () => {
     const rows = syntheticRegion();
     rows.push(ch({ channel: 'No Ref', santoorReach: 8, maxCompReach: 0, indexVsCompetition: 999 }));
-    rows.push(ch({ channel: 'Huge', santoorReach: 45, maxCompReach: 10 }));
+    rows.push(ch({ channel: 'Huge', santoorReach: 145, maxCompReach: 10 }));
     const s = computeScenario(rows, 'Karnataka', { intensity: 100, threshold: 0 });
     expect(s.outcomes.get('No Ref')!.action).toBe('MAINTAIN');
     expect(s.outcomes.get('Huge')!.action).toBe('MAINTAIN');
@@ -517,6 +517,56 @@ describe('factual notices and parity', () => {
   });
 });
 
+describe('new-channel funding and headroom claims', () => {
+  const repro = () => [
+    ch({ channel: 'Leader', santoorReach: 20, maxCompReach: 1 }),
+    ch({ channel: 'Trailing donor', santoorReach: 20, maxCompReach: 28 }),
+    ch({ channel: 'White', santoorReach: 0, maxCompReach: 3.6, channelShare: 2 }),
+  ];
+
+  it('funds a new channel from a single donor when the base-ranked mix fails the low-curve check (reviewer repro)', () => {
+    // six held channels (no competitor reference) lift the region over the Layer 2 minimum without joining the moves
+    const fillers = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'].map(n => ch({ channel: n, santoorReach: 5, maxCompReach: 0 }));
+    const s = computeScenario([...repro(), ...fillers], 'Maharashtra', { intensity: 100, threshold: 0 });
+    expect(s.movedWeight).toBeGreaterThan(0.5);
+    expect(s.counts.ADD).toBe(1);
+    expect(s.outcomes.get('White')!.action).toBe('ADD');
+    expect(s.outcomes.get('Trailing donor')!.action).toBe('DECREASE');
+    expect(s.layer2!.netReachPoints.low).toBeGreaterThanOrEqual(0);
+    expect(s.residualMoves).toBe(0);
+    expect(computeUsefulIntensity(repro(), 'Maharashtra', 0)).toBeGreaterThan(0);
+  });
+
+  it('never claims used-up headroom while a low-case-positive move exists', () => {
+    for (const c of cells) {
+      for (const t of STEPS) {
+        const none = c.grid.get(key(0, t))!; // nothing moved: residualMoves is the initial feasible-move count
+        const u = computeUsefulIntensity(c.channels, c.market, t);
+        if (none.residualMoves > 0) expect(u, `${c.scr} t=${t}`).toBeGreaterThan(0);
+        for (const i of STEPS) {
+          const s = c.grid.get(key(i, t))!;
+          if (s.notice?.startsWith('Headroom used up')) expect(s.residualMoves).toBe(0);
+        }
+      }
+    }
+  });
+
+  it('words an untouched trailing donor as behind, never as a negative lead', () => {
+    for (const c of cells) {
+      const s = c.grid.get(key(15, 30))!;
+      for (const o of s.outcomes.values()) expect(o.reason).not.toMatch(/Leads [^,;]* by -|by -\d/);
+    }
+  });
+
+  it('always describes DECREASE size as a share of modelled weight', () => {
+    for (const c of cells) {
+      for (const s of c.grid.values()) {
+        for (const o of s.outcomes.values()) if (o.action === 'DECREASE') expect(o.reason).toMatch(/% of its modelled weight/);
+      }
+    }
+  });
+});
+
 describe('data audit', () => {
   it('recognises regional languages and their home markets', () => {
     expect(detectLanguage('ABN Andhra Jyothi')?.language).toBe('Telugu');
@@ -543,8 +593,11 @@ describe('data audit', () => {
     expect(auditChannel(ch({ channel: 'Sandesh News', ...low }), 'UP').languageNote).toMatch(/Gujarati/);
   });
 
-  it('flags the 999 index sentinel and reach above 40%', () => {
+  it('flags the 999 index sentinel, notes reach above 40%, and holds only impossible reach', () => {
     expect(auditChannel(ch({ channel: 'X', santoorReach: 3, maxCompReach: 0, indexVsCompetition: 999 }), 'UP').flags).toContain('NO_COMPETITOR_REF');
-    expect(auditChannel(ch({ channel: 'X', santoorReach: 41, maxCompReach: 10 }), 'Karnataka').flags).toContain('HIGH_REACH');
+    const high = auditChannel(ch({ channel: 'X', santoorReach: 41, maxCompReach: 10 }), 'Karnataka');
+    expect(high.flags).toEqual([]); // 40%+ is plausible for a top Kannada GEC: note only
+    expect(high.reachNote).toMatch(/41\.0%/);
+    expect(auditChannel(ch({ channel: 'X', santoorReach: 120, maxCompReach: 10 }), 'Karnataka').flags).toContain('IMPOSSIBLE_REACH');
   });
 });

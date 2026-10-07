@@ -540,8 +540,8 @@ export default function App() {
                   {optType === 'ATC' ? 'ATC MARKET' : 'REACH MARKET'}
                 </span>
               </div>
-              <button onClick={resetLevers} className="btn-tactical">
-                ↺ RESET LEVERS
+              <button onClick={resetLevers} className="btn-tactical" aria-label="Reset levers to defaults" title="Restore the default intensity and threshold">
+                ↺ Reset levers
               </button>
             </div>
             <div className="p-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>

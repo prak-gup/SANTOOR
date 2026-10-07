@@ -38,7 +38,7 @@ A channel is held (always MAINTAIN) if it carries a data flag (section 7). Other
 - A channel cannot be both a donor and a receiver in one scenario.
 - Everything else is MAINTAIN.
 
-A donor never gives more than 50% of its own weight. A donor that leads its competitor is never cut below competitor parity **in any of the three displayed bands** (the cap is the tightest of the low, base and high curves).
+A donor never gives more than 50% of its own modelled weight (a share of the reach-point proxy, not of any budget). A donor that leads its competitor is never cut below competitor parity **in any of the three displayed bands** (the cap is the tightest of the low, base and high curves).
 
 ## 4. Response curve
 
@@ -62,7 +62,7 @@ anchored on the observed point: `R(w_i) = r_i` with `w_i = r_i`, so `k = -ln(1 -
 1. Move weight in slices of `unprotected weight / 200`.
 2. For each slice, try receiver/donor pairs in order of base-case return: receivers from highest marginal return (ties: largest gap, share, name), donors from lowest (ties: strongest lead, share, name). The first pair that passes the benefit rule and the low-curve check (step 3) is used. **A failing pair is skipped and the next pair is tried**; the engine stops only when no feasible pair remains or the request is met. The result carries a self-check (`residualMoves`) that is 0 whenever it reports used-up headroom.
 3. Stop when any of these holds: the requested move is reached; no donor or receiver has capacity; the best receiver's marginal return does not beat the cheapest donor's (moving more would not pay for itself); or the next slice would have a **negative net change under the low curve** (see section 6). A move is therefore only ever made if it is robust to the pessimistic curve.
-4. A new channel is only ever funded in one block large enough to give at least 0.5 reach-points of entry reach (base curve); smaller entries are not recommended.
+4. A new channel is only ever funded in one block large enough to give at least 0.5% of entry reach (base curve); smaller entries are not recommended. The block is funded by the base-ranked mix of donors, or, if that mix fails the low-curve check, by each single donor with enough capacity (best low-case net first). Only if no such plan passes is the channel left unfunded, and unfunded channels are re-tested as donor state changes. The headroom check and the useful-range marker count a fundable new channel as remaining headroom.
 5. A receiver stops at the point where its projected reach would close 60% of its gap (INCREASE) or reach 90% of its entry ceiling (ADD).
 
 The sequence of moves depends only on the data and the threshold. Intensity decides how far along that sequence the engine goes, so raising intensity can only extend the previous result. Weight moved and the number of intervened channels never fall as intensity rises.
@@ -108,14 +108,14 @@ Layer 2 is suppressed when a region has fewer than 8 active channels. Layer 1 st
 
 ## 7. Data audit flags (flag, never alter)
 
-The data is displayed as supplied. Two hold flags decide only whether the engine may act on a channel; held channels are always MAINTAIN, with the reason shown in the row.
+Reach above 40% on one channel is **not** a hold: 45-55% cumulative reach is plausible for a top Kannada general-entertainment channel (Zee Kannada, Udaya TV, Colors Kannada Cinema, Udaya Music in Karnataka). It only produces an informational note. The data is displayed as supplied. Two hold flags decide only whether the engine may act on a channel; held channels are always MAINTAIN, with the reason shown in the row.
 
 **Observed reach is the evidence; language is never a reason to drop a channel.** Any channel with Santoor or competitor reach >= 1.0% in the market/SCR is in scope whatever its language. Language is checked only below that bar and only produces an informational note (it never holds a channel). Typical languages per market: Karnataka = Kannada, Telugu, Tamil, Hindi, English (Bengaluru and the border districts watch Telugu and Tamil heavily); Maharashtra = Marathi, Hindi, English, with Gujarati spillover; UP = Hindi, Urdu, Bhojpuri, English. The name patterns live in `dataAudit.ts`.
 
 | Flag | Rule | Why |
 |---|---|---|
 | `NO_COMPETITOR_REF` | Santoor reach > 0 and competitor reach < 0.5. | The 999 index sentinel, or an index computed on a near-zero denominator (for example 733 on 0.44 vs 0.06). Lead cannot be assessed. The table shows the index as "n/a". |
-| `HIGH_REACH` | Santoor reach > 40% on one channel. | Verify before acting (Zee Kannada, Udaya TV, Colors Kannada Cinema and Udaya Music exceed it in Karnataka). |
+| `IMPOSSIBLE_REACH` | Santoor or competitor reach above 100% on one channel. | Cannot be real. Nothing in the current data triggers it. |
 
 In Karnataka Overall, 17 Telugu/Tamil/Marathi channels that an earlier version held on language alone (for example Gemini Movies 5.7%, Gemini TV 5.0%, Star Maa Movies 5.8%, Zee Cinemalu 3.6%, STAR Maa 3.3%) are now in scope. Those with competitor reach under 0.5 (for example Star Maa Movies) are still held by `NO_COMPETITOR_REF`, which is a data-quality rule, not a language rule. In UP and Maharashtra no in-scope channel was ever held on language.
 
@@ -150,7 +150,7 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 | Min gap to INCREASE | 0.5 pt (`MIN_GAP_TO_ACT`; the UI text reads it from the code) |
 | White-space rule | competitor >= 2.0, share >= 1.0 |
 | Min competitor reference | 0.5 |
-| Max cut per donor | 50% of its weight |
+| Max cut per donor | 50% of its modelled weight |
 | Max gap closed per channel | 60% |
 | Entry cap | 50% of competitor reach |
 | Min entry reach (new channel) | 0.5 reach-points |

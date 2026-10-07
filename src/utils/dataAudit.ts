@@ -1,6 +1,6 @@
 // ============================================================
 // DATA AUDIT — flags channel rows that look implausible for the market.
-// Flags never change the data. HOLD flags (NO_COMPETITOR_REF, HIGH_REACH) decide whether the
+// Flags never change the data. HOLD flags (NO_COMPETITOR_REF, IMPOSSIBLE_REACH) decide whether the
 // scenario engine may act on a channel. Language is informational only: observed reach is the
 // evidence, so a channel is never held because of its language.
 // ============================================================
@@ -11,7 +11,7 @@ export type MarketKey = 'UP' | 'Maharashtra' | 'Karnataka';
 
 export type AuditFlag =
   | 'NO_COMPETITOR_REF' // Santoor reach but competitor reach < MIN_COMP_REF, so index/lead is not meaningful
-  | 'HIGH_REACH'; // Santoor reach above 40% on one channel — verify before acting
+  | 'IMPOSSIBLE_REACH'; // a reach above 100% cannot be real
 
 /** Competitor reach below this (reach %) is treated as "no usable competitor reference". */
 export const MIN_COMP_REF = 0.5;
@@ -20,8 +20,8 @@ export const MIN_COMP_REF = 0.5;
  * whatever its language. Language notes are only produced below this bar.
  */
 export const EVIDENCE_REACH = 1.0;
-/** Single-channel Santoor reach above this (reach %) is flagged for verification. */
-export const HIGH_REACH_FLAG = 40;
+/** Santoor reach above this on one channel is noted for verification (informational, never holds a channel). */
+export const HIGH_REACH_NOTE = 40;
 
 interface LanguageRule {
   language: string;
@@ -89,6 +89,8 @@ export interface ChannelAudit {
   notes: string[];
   /** Informational only (never holds a channel): language that is not typical for this market, below the evidence bar. */
   languageNote: string | null;
+  /** Informational only: unusually high single-channel reach worth a glance. */
+  reachNote: string | null;
 }
 
 export function auditChannel(ch: ChannelRecord, market: MarketKey): ChannelAudit {
@@ -107,11 +109,15 @@ export function auditChannel(ch: ChannelRecord, market: MarketKey): ChannelAudit
       `competitor reach ${ch.maxCompReach.toFixed(2)}% (index ${Math.round(ch.indexVsCompetition)} is not meaningful)`
     );
   }
-  if (ch.santoorReach > HIGH_REACH_FLAG) {
-    flags.push('HIGH_REACH');
-    notes.push(`Santoor reach ${ch.santoorReach.toFixed(1)}% on a single channel`);
+  if (ch.santoorReach > 100 || ch.maxCompReach > 100) {
+    flags.push('IMPOSSIBLE_REACH');
+    notes.push(`reach above 100% (Santoor ${ch.santoorReach.toFixed(1)}%, competitor ${ch.maxCompReach.toFixed(1)}%)`);
   }
-  return { channel: ch.channel, flags, notes, languageNote };
+  const reachNote =
+    ch.santoorReach > HIGH_REACH_NOTE
+      ? `Santoor reach ${ch.santoorReach.toFixed(1)}% on one channel; plausible for a top regional general-entertainment channel, verify only if unexpected`
+      : null;
+  return { channel: ch.channel, flags, notes, languageNote, reachNote };
 }
 
 export function auditChannels(channels: ChannelRecord[], market: MarketKey): Map<string, ChannelAudit> {

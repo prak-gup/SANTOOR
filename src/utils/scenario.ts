@@ -35,7 +35,7 @@ export const MODEL_PARAMS = {
   /** White-space (ADD) rule, unchanged from the original filter: competitor reach and channel share. */
   ADD_MIN_COMP_REACH: 2.0,
   ADD_MIN_SHARE: 1.0,
-  /** A donor can give up at most this fraction of its own weight. */
+  /** A donor can give up at most this fraction of its own modelled weight. */
   MAX_CUT_FRACTION: 0.5,
   /** Projected gap closed on any one channel never exceeds this fraction of its gap. */
   MAX_GAP_CLOSED: 0.6,
@@ -336,6 +336,7 @@ export function computeScenario(
   let remaining = requestedWeight;
   let guard = 0;
   let stopReason: StopReason = 'none';
+  let entryNeeded = 0;
   const rxBy = new Map(receivers.map(r => [r.ch.channel, r]));
   const donBy = new Map(donors.map(d => [d.ch.channel, d]));
   const donorM = (d: Donor) => marginal(d.curve, d.curve.w0 - d.z);
@@ -350,6 +351,49 @@ export function computeScenario(
     receivers
       .filter(r => !r.skip && r.x < r.xMax - EPS && (donBy.get(r.ch.channel)?.z ?? 0) <= EPS)
       .sort((x, y) => (Math.abs(receiverM(x) - receiverM(y)) > EPS ? receiverM(y) - receiverM(x) : compareReceiver(x, y)));
+
+  /**
+   * Cheapest robust way to fund the entry block of a new channel, or null. Tries the base-ranked mix of
+   * donors first, then each single donor with enough capacity (best low-case net first). A plan is
+   * feasible when the block beats the donors' base return and its net change under the low curve is >= 0.
+   */
+  const bestAddPlan = (rec: Receiver): Map<Donor, number> | null => {
+    const dons = rankedDonors(rec.ch);
+    if (dons.length === 0) return null;
+    const candidates: Map<Donor, number>[] = [];
+    const mix = new Map<Donor, number>();
+    let need = rec.xMin;
+    while (need > EPS) {
+      const d2 = rankedDonors(rec.ch)[0];
+      if (!d2) break;
+      const amount = Math.min(delta, need, d2.zMax - d2.z);
+      d2.z += amount;
+      mix.set(d2, (mix.get(d2) ?? 0) + amount);
+      need -= amount;
+    }
+    for (const [d, amount] of mix) d.z -= amount; // simulation only
+    if (need <= EPS) candidates.push(mix);
+    const gainLow = recProj(rec, 'low', rec.xMin);
+    const net = (plan: Map<Donor, number>) => {
+      let loss = 0;
+      for (const [d, amount] of plan) loss += donProj(d, 'low', d.z) - donProj(d, 'low', d.z + amount);
+      return gainLow - loss;
+    };
+    const singles = dons
+      .filter(d => d.zMax - d.z >= rec.xMin - EPS)
+      .map(d => new Map<Donor, number>([[d, rec.xMin]]))
+      .sort((x, y) => net(y) - net(x));
+    candidates.push(...singles);
+    const avgYield = P.MIN_ENTRY_REACH / rec.xMin;
+    for (const plan of candidates) {
+      let baseM = 0;
+      for (const [d, amount] of plan) baseM += (donorM(d) * amount) / rec.xMin;
+      if (avgYield < P.GAIN_OVER_LOSS * baseM) continue;
+      if (P.REQUIRE_LOW_CASE_NET && net(plan) < 0) continue;
+      return plan;
+    }
+    return null;
+  };
 
   while (remaining > EPS && delta > 0 && guard++ < P.STEPS * 8) {
     const recs = rankedReceivers();
@@ -372,34 +416,18 @@ export function computeScenario(
       if (dons.length === 0) continue;
       if (rec.kind === 'ADD' && rec.x === 0) {
         // Entry block: a new channel must clear the minimum entry reach, funded from one or more donors.
-        const capacity = dons.reduce((sum, d) => sum + Math.max(0, d.zMax - d.z), 0);
-        const avgYield = P.MIN_ENTRY_REACH / rec.xMin;
-        if (capacity < rec.xMin - EPS || avgYield < P.GAIN_OVER_LOSS * donorM(dons[0])) {
-          rec.skip = true;
-          continue;
-        }
-        if (remaining < rec.xMin - EPS) {
-          stop = 'entry';
-          break search;
-        }
-        const taken = new Map<Donor, number>();
-        let need = rec.xMin;
-        while (need > EPS) {
-          const d2 = rankedDonors(rec.ch)[0];
-          if (!d2) break;
-          const amount = Math.min(delta, need, d2.zMax - d2.z);
-          d2.z += amount;
-          taken.set(d2, (taken.get(d2) ?? 0) + amount);
-          need -= amount;
-        }
-        let lossLow = 0;
-        for (const [d, amount] of taken) lossLow += donProj(d, 'low', d.z - amount) - donProj(d, 'low', d.z);
-        if (need > EPS || (P.REQUIRE_LOW_CASE_NET && recProj(rec, 'low', rec.xMin) - lossLow < 0)) {
-          for (const [d, amount] of taken) d.z -= amount;
+        const plan = bestAddPlan(rec);
+        if (!plan) {
           rec.skip = true;
           sawLow = true;
           continue;
         }
+        if (remaining < rec.xMin - EPS) {
+          stop = 'entry';
+          entryNeeded = rec.xMin;
+          break search;
+        }
+        for (const [d, amount] of plan) d.z += amount;
         rec.x = rec.xMin;
         movedWeight += rec.xMin;
         remaining -= rec.xMin;
@@ -431,6 +459,15 @@ export function computeScenario(
       break;
     }
     if (!done) {
+      // A new channel skipped earlier may have become fundable as the donors' state changed.
+      let revived = false;
+      for (const r of receivers) {
+        if (r.kind === 'ADD' && r.skip && r.x === 0 && r.xMin < r.xMax && bestAddPlan(r)) {
+          r.skip = false;
+          revived = true;
+        }
+      }
+      if (revived) continue;
       stopReason = sawLow ? 'low' : 'benefit';
       break;
     }
@@ -438,6 +475,9 @@ export function computeScenario(
   // Self-check: feasible slices (base return beats the donor, low-case net >= 0) still available at the end.
   // Zero whenever the search stopped for lack of moves, which is what makes "headroom used up" literal.
   let residualMoves = 0;
+  for (const rec of receivers) {
+    if (rec.kind === 'ADD' && rec.x === 0 && rec.xMin < rec.xMax && bestAddPlan(rec)) residualMoves++;
+  }
   for (const rec of rankedReceivers()) {
     if (rec.kind === 'ADD' && rec.x === 0) continue;
     for (const don of rankedDonors(rec.ch)) {
@@ -463,6 +503,7 @@ export function computeScenario(
     heldReceivers: eligible.filter(c => heldFlags(c).length > 0 && (isWhitespace(c) || c.maxCompReach - c.santoorReach >= P.MIN_GAP_TO_ACT)).length,
     requestedWeight,
     movedWeight,
+    entryNeeded,
   });
 
   const projectReceiver = (rc: Receiver, band: BandName): number => recProj(rc, band, rc.x);
@@ -509,7 +550,7 @@ export function computeScenario(
       action = 'DECREASE';
       weightDelta = -dn.z;
       projected = bandValues(b => projectDonor(dn, b));
-      const cut = `DECREASE -${fmtDelta(dn.z)} reach-pts (${Math.round((dn.z / r) * 100)}% of its weight), reach ${f1(r)}% → ${f1(projected.base)}%`;
+      const cut = `DECREASE -${fmtDelta(dn.z)} reach-pts (${Math.round((dn.z / r) * 100)}% of its modelled weight), reach ${f1(r)}% → ${f1(projected.base)}%`;
       reason = dn.leader
         ? `Leads ${comp} by ${f1(r - c)} pts, index ${idx(ch)}, not protected → ${cut}`
         : `Low return: reach ${f1(r)}% vs ${comp} ${f1(c)}% (index ${idx(ch)}), each reach-point of weight here earns only ~${dn.m0.toFixed(1)} → ${cut}`;
@@ -648,6 +689,7 @@ interface NoticeCtx {
   heldReceivers: number;
   requestedWeight: number;
   movedWeight: number;
+  entryNeeded: number;
 }
 
 function buildNotice(x: NoticeCtx): string | null {
@@ -669,9 +711,9 @@ function buildNotice(x: NoticeCtx): string | null {
     case 'low':
       return `Headroom used up: ${moved}. Every remaining move would lose reach under the pessimistic (low) curve.`;
     case 'entry':
-      return `Stopped: ${moved}. The next step is a new channel, which needs at least ${f1(P.MIN_ENTRY_REACH)} reach-pts of weight to be worth recommending.`;
+      return `Stopped: ${moved}. The next step funds a new channel, which needs about ${f1(x.entryNeeded)} reach-pts of weight to earn a ${f1(P.MIN_ENTRY_REACH)}% entry reach, more than the ${f1(x.requestedWeight - x.movedWeight)} left in the request.`;
     case 'donors':
-      return `Headroom used up: ${moved}. Every donor has given its maximum (50% of its weight, or down to competitor parity).`;
+      return `Headroom used up: ${moved}. Every donor has given its maximum (50% of its modelled weight, or down to competitor parity).`;
     default:
       return `Headroom used up: ${moved}. Every receiving channel has reached its cap (60% of gap, or 50% of competitor reach on new channels).`;
   }
@@ -756,7 +798,8 @@ function maintainReason(x: MaintainCtx): string {
       : `Behind ${comp} by ${f1(c - r)} pts, index ${idx(ch)} → no change (${why})`;
   }
   if (x.isDonor) {
-    return `Leads ${comp} by ${f1(r - c)} pts, index ${idx(ch)}; available as donor → not trimmed at this intensity`;
+    const pos = gapTxt ? `${gapTxt[0].toUpperCase()}${gapTxt.slice(1)}, index ${idx(ch)}` : `Reach ${f1(r)}%`;
+    return `${pos}; low return per weight point, available as donor → not trimmed at this intensity`;
   }
   if (c >= MIN_COMP_REF && c - r > 0 && c - r < P.MIN_GAP_TO_ACT) {
     return `Behind ${comp} by ${f1(c - r)} pts, index ${idx(ch)} → gap under the ${P.MIN_GAP_TO_ACT.toFixed(1)}-pt action floor, hold`;

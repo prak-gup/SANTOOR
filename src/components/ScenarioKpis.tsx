@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { MODEL_PARAMS } from '../utils/scenario';
 import type { ScenarioResult } from '../utils/scenario';
 
 interface BaselineSummary {
@@ -181,7 +182,7 @@ export default function ScenarioKpis({ scenario: s, baseline, statusClasses }: P
           label="Increase"
           value={s.counts.INCREASE}
           color="var(--signal-positive)"
-          how="Active channels where Santoor trails by ≥1.0 pt and extra weight earns more reach than a donor gives up, even under the pessimistic curve."
+          how={`Active channels where Santoor trails by ≥${MODEL_PARAMS.MIN_GAP_TO_ACT.toFixed(1)} pt and extra weight earns more reach than a donor gives up, even under the pessimistic curve.`}
         />
         <Card
           label="Maintain"

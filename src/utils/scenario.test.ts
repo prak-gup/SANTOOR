@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { computeScenario, DEFAULT_LEVERS, eligibleChannels, getProtectedSet, MODEL_PARAMS } from './scenario';
+import { computeScenario, computeUsefulIntensity, DEFAULT_LEVERS, eligibleChannels, getProtectedSet, MODEL_PARAMS } from './scenario';
 import type { ScenarioResult } from './scenario';
 import { channelsFor, MARKET_KEYS, scrsFor } from './marketData';
 import type { MarketKey } from './dataAudit';
@@ -198,7 +198,8 @@ describe('invariants over every intensity x threshold x market x SCR', () => {
           if (o.action === 'DECREASE') {
             expect(-o.weightDelta).toBeLessThanOrEqual(MAX_CUT_FRACTION * r + 1e-7);
             expect(s.protectedSet.has(o.channel)).toBe(false); // only unprotected channels donate
-            if (r >= comp) expect(o.projected.base).toBeGreaterThanOrEqual(comp - 1e-6); // a leader is never cut below parity
+            // a leader is never cut below competitor parity, in ANY displayed band
+            if (r >= comp) for (const band of ['low', 'base', 'high'] as const) expect(o.projected[band]).toBeGreaterThanOrEqual(comp - 1e-6);
           }
         }
       }
@@ -238,6 +239,7 @@ describe('invariants over every intensity x threshold x market x SCR', () => {
       for (const o of s.outcomes.values()) {
         expect(o.reason.length).toBeGreaterThan(10);
         expect(o.reason).not.toMatch(/NaN|undefined|Infinity/);
+        if (o.action !== 'MAINTAIN') expect(o.reason, `${c.scr} ${o.channel}`).toMatch(/\d/);
       }
     }
   });
@@ -249,7 +251,7 @@ describe('default levers (intensity 15, threshold 30) are visible and modest', (
       const s = c.grid.get(key(DEFAULT_LEVERS.intensity, DEFAULT_LEVERS.threshold))!;
       expect(s.layer2).not.toBeNull();
       const l2 = s.layer2!;
-      expect(l2.gainReachPoints.base).toBeLessThanOrEqual(0.05 * s.rosterWeight);
+      expect(l2.gainReachPoints.base).toBeLessThanOrEqual(0.07 * s.rosterWeight);
       expect(Math.abs(l2.netReachPoints.base)).toBeLessThan(0.05 * s.rosterWeight);
       expect(l2.gapClosedShare.high).toBeLessThanOrEqual(MODEL_PARAMS.MAX_GAP_CLOSED);
       expect(s.movedShareRoster).toBeLessThanOrEqual(0.08);
@@ -292,6 +294,32 @@ describe('intensity is alive', () => {
     }
     const up = STEPS.map(i => cells.find(x => x.scr === 'UP Overall')!.grid.get(key(i, DEFAULT_LEVERS.threshold))!.movedWeight);
     expect(new Set(up.map(m => m.toFixed(6))).size).toBeGreaterThan(3);
+  });
+
+  it('leaves no feasible move behind when it reports used-up headroom', () => {
+    for (const c of cells) {
+      for (const s of c.grid.values()) {
+        if (s.limitedBelowRequest && s.notice?.startsWith('Headroom used up')) expect(s.residualMoves, `${c.scr} ${s.levers.intensity}/${s.levers.threshold}`).toBe(0);
+      }
+    }
+  });
+
+  it('useful intensity marks exactly where moved weight stops increasing', () => {
+    for (const c of cells) {
+      for (const t of [0, 30, 50, 70, 100]) {
+        const u = computeUsefulIntensity(c.channels, c.market, t);
+        const full = c.grid.get(key(100, t))!;
+        expect(u).toBeGreaterThanOrEqual(0);
+        expect(u).toBeLessThanOrEqual(100);
+        const atMarker = computeScenario(c.channels, c.market, { intensity: u, threshold: t });
+        expect(atMarker.movedWeight, `${c.scr} t=${t} u=${u}`).toBeCloseTo(full.movedWeight, 6);
+        if (u > 1) {
+          const below = computeScenario(c.channels, c.market, { intensity: u - 1, threshold: t });
+          expect(below.movedWeight).toBeLessThan(full.movedWeight - 1e-9);
+        }
+        if (u === 0) expect(full.movedWeight).toBe(0);
+      }
+    }
   });
 
   it('never recommends a move that loses reach under the low curve', () => {
@@ -406,6 +434,56 @@ describe('engine behaviour on a controlled region', () => {
     ];
     const p = getProtectedSet(eligibleChannels(rows), 50);
     expect([...p].sort()).toEqual(['A', 'C']);
+  });
+});
+
+describe('factual notices and parity', () => {
+  it('names the real reason when nothing can donate: protection vs data holds', () => {
+    // all channels protected
+    const rows = syntheticRegion();
+    const all = computeScenario(rows, 'Maharashtra', { intensity: 50, threshold: 100 });
+    expect(all.notice).toMatch(/threshold protects all 9 active channels/);
+    // unprotected channels exist but are all held by data flags
+    const held = [
+      ch({ channel: 'Big A', santoorReach: 20, maxCompReach: 8 }),
+      ch({ channel: 'Big B', santoorReach: 18, maxCompReach: 8 }),
+      ch({ channel: 'Big C', santoorReach: 15, maxCompReach: 8 }),
+      ch({ channel: 'Big D', santoorReach: 14, maxCompReach: 8 }),
+      ch({ channel: 'Big E', santoorReach: 12, maxCompReach: 8 }),
+      ch({ channel: 'Big F', santoorReach: 11, maxCompReach: 8 }),
+      ch({ channel: 'Big G', santoorReach: 10, maxCompReach: 8 }),
+      ch({ channel: 'Big H', santoorReach: 9, maxCompReach: 8 }),
+      ch({ channel: 'Gemini TV', santoorReach: 3, maxCompReach: 1 }),
+      ch({ channel: 'Zee Telugu', santoorReach: 2.5, maxCompReach: 1 }),
+    ];
+    const s = computeScenario(held, 'Karnataka', { intensity: 50, threshold: 80 });
+    expect(s.notice).toMatch(/none of the 2 unprotected active channels can give weight \(2 held by data flags/);
+    expect(s.notice).not.toMatch(/protects/);
+  });
+
+  it('holds donor parity in every band even when the low curve is steep', () => {
+    const rows = [
+      ch({ channel: 'Edge', santoorReach: 5.0, maxCompReach: 4.8 }),
+      ...syntheticRegion().filter(r => r.channel.startsWith('Lag') || r.channel === 'White J'),
+      ch({ channel: 'Anchor1', santoorReach: 20, maxCompReach: 6 }),
+      ch({ channel: 'Anchor2', santoorReach: 18, maxCompReach: 6 }),
+      ch({ channel: 'Anchor3', santoorReach: 15, maxCompReach: 6 }),
+    ];
+    const s = computeScenario(rows, 'Maharashtra', { intensity: 100, threshold: 25 });
+    const edge = s.outcomes.get('Edge')!;
+    if (edge.projected) for (const band of ['low', 'base', 'high'] as const) expect(edge.projected[band]).toBeGreaterThanOrEqual(4.8 - 1e-6);
+  });
+
+  it('keeps searching after a failing pair and reports no residual feasible move', () => {
+    const rows = [
+      ...syntheticRegion(),
+      ch({ channel: 'Lag K', santoorReach: 3.5, maxCompReach: 9 }),
+      ch({ channel: 'Near L', santoorReach: 4.4, maxCompReach: 4.9 }),
+    ];
+    const s = computeScenario(rows, 'Maharashtra', { intensity: 100, threshold: 0 });
+    expect(s.residualMoves).toBe(0);
+    expect(s.movedWeight).toBeGreaterThan(0);
+    expect(s.layer2!.netReachPoints.low).toBeGreaterThanOrEqual(-1e-9);
   });
 });
 

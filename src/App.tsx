@@ -10,7 +10,7 @@ import {
   filterRelevantChannels,
   calculateStatus,
 } from './utils/optimization';
-import { computeScenario, DEFAULT_LEVERS } from './utils/scenario';
+import { computeScenario, computeUsefulIntensity, DEFAULT_LEVERS } from './utils/scenario';
 import { MIN_COMP_REF } from './utils/dataAudit';
 import type { MarketKey } from './utils/dataAudit';
 import ScenarioKpis from './components/ScenarioKpis';
@@ -394,6 +394,12 @@ export default function App() {
     [enrichedChannels, market, intensity, threshold]
   );
 
+  // Where more intensity stops moving anything (true headroom under the conservative caps).
+  const usefulIntensity = useMemo(
+    () => computeUsefulIntensity(enrichedChannels, market as MarketKey, threshold),
+    [enrichedChannels, market, threshold]
+  );
+
   const resetLevers = () => {
     setIntensity(DEFAULT_LEVERS.intensity);
     setThreshold(DEFAULT_LEVERS.threshold);
@@ -570,16 +576,45 @@ export default function App() {
                       </div>
                     </InfoButton>
                   </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={intensity}
-                    onChange={e => setIntensity(+e.target.value)}
-                    aria-label="Intensity: percent of unprotected reach-point weight to reallocate"
-                    style={{ width: '100%' }}
+                  <div style={{ position: 'relative' }}>
+                    {usefulIntensity < 100 && (
+                      <div
+                        aria-hidden="true"
+                        title="Beyond the useful range no defensible move remains"
+                        style={{
+                          position: 'absolute',
+                          top: '50%',
+                          height: '10px',
+                          transform: 'translateY(-50%)',
+                          left: `calc(${usefulIntensity}% * 0.96 + 2%)`,
+                          right: '1%',
+                          borderRadius: '5px',
+                          background: 'repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 4px, var(--border) 4px, var(--border) 8px)',
+                          borderLeft: '2px solid var(--orange-bright)',
+                          pointerEvents: 'none',
+                          opacity: 0.9
+                        }}
+                      />
+                    )}
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={intensity}
+                      onChange={e => setIntensity(+e.target.value)}
+                      aria-label="Intensity: percent of unprotected reach-point weight to reallocate"
+                      style={{ width: '100%' }}
                   />
+                  </div>
+                  <div style={{ marginTop: '8px', fontSize: '11px', lineHeight: 1.4, color: 'var(--text-tertiary)', fontFamily: 'DM Mono, monospace' }}
+                       title="Diminishing returns: the engine only moves weight to a channel where it earns more reach than the donor loses, also under the pessimistic curve, and never beyond the per-channel caps. Once those moves are used up, raising intensity changes nothing.">
+                    {usefulIntensity === 0
+                      ? 'No defensible move exists at this threshold under the conservative caps.'
+                      : usefulIntensity >= 100
+                        ? 'Useful range covers the whole slider.'
+                        : `Useful range ends at ${usefulIntensity}% — beyond this no defensible move remains under conservative caps.`}
+                  </div>
                   <div style={{
                     display: 'flex',
                     justifyContent: 'space-between',

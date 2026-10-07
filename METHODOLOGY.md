@@ -38,7 +38,7 @@ A channel is held (always MAINTAIN) if it carries a data flag (section 7). Other
 - A channel cannot be both a donor and a receiver in one scenario.
 - Everything else is MAINTAIN.
 
-A donor never gives more than 50% of its own weight. A donor that leads its competitor is never cut below competitor parity.
+A donor never gives more than 50% of its own weight. A donor that leads its competitor is never cut below competitor parity **in any of the three displayed bands** (the cap is the tightest of the low, base and high curves).
 
 ## 4. Response curve
 
@@ -60,7 +60,7 @@ anchored on the observed point: `R(w_i) = r_i` with `w_i = r_i`, so `k = -ln(1 -
 ## 5. Allocation: greedy water-filling
 
 1. Move weight in slices of `unprotected weight / 200`.
-2. For each slice, take from the donor with the lowest marginal return (ties: strongest lead, then channel share, then name) and give to the receiver with the highest marginal return (ties: largest gap, then share, then name).
+2. For each slice, try receiver/donor pairs in order of base-case return: receivers from highest marginal return (ties: largest gap, share, name), donors from lowest (ties: strongest lead, share, name). The first pair that passes the benefit rule and the low-curve check (step 3) is used. **A failing pair is skipped and the next pair is tried**; the engine stops only when no feasible pair remains or the request is met. The result carries a self-check (`residualMoves`) that is 0 whenever it reports used-up headroom.
 3. Stop when any of these holds: the requested move is reached; no donor or receiver has capacity; the best receiver's marginal return does not beat the cheapest donor's (moving more would not pay for itself); or the next slice would have a **negative net change under the low curve** (see section 6). A move is therefore only ever made if it is robust to the pessimistic curve.
 4. A new channel is only ever funded in one block large enough to give at least 0.5 reach-points of entry reach (base curve); smaller entries are not recommended.
 5. A receiver stops at the point where its projected reach would close 60% of its gap (INCREASE) or reach 90% of its entry ceiling (ADD).
@@ -68,6 +68,10 @@ anchored on the observed point: `R(w_i) = r_i` with `w_i = r_i`, so `k = -ln(1 -
 The sequence of moves depends only on the data and the threshold. Intensity decides how far along that sequence the engine goes, so raising intensity can only extend the previous result. Weight moved and the number of intervened channels never fall as intensity rises.
 
 Every channel gets exactly one action: ADD (weight added to a new channel), INCREASE (weight added), DECREASE (weight removed), MAINTAIN. The four counts add up to the number of in-scope channels. HIGH priority = an INCREASE with a gap of 5+ pts, or an ADD with competitor reach above 5%.
+
+### Useful range of the intensity slider
+
+`computeUsefulIntensity` returns, for the current market, SCR and threshold, the lowest whole-% intensity at which the moved weight equals the moved weight at 100%. The slider shows a hatched region beyond it with the label "Useful range ends at X%". Planner wording: past that point every remaining move would either earn less reach than the donor loses, lose reach under the pessimistic curve, or breach a per-channel cap, so raising intensity changes nothing. Moved weight never falls as intensity rises, which is what lets the marker be found by search.
 
 When less than requested can move, the app says "Headroom used up: X of Y requested reach-pts moved" and why. Intensity therefore moves weight in proportion to the request only until that headroom is used; in Rest of Maharashtra and Karnataka the headroom is small (few channels where Santoor trails), so intensity plateaus early. That is a property of the data, not of the slider.
 
@@ -140,7 +144,7 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 
 | Parameter | Value |
 |---|---|
-| Min gap to INCREASE | 0.5 pt |
+| Min gap to INCREASE | 0.5 pt (`MIN_GAP_TO_ACT`; the UI text reads it from the code) |
 | White-space rule | competitor >= 2.0, share >= 1.0 |
 | Min competitor reference | 0.5 |
 | Max cut per donor | 50% of its weight |

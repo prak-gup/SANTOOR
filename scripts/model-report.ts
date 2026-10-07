@@ -1,7 +1,7 @@
 // Usage: INTENSITY=15 THRESHOLD=70 [AUDIT=1] npx vite-node scripts/model-report.ts
 // Prints Layer 1 + Layer 2 numbers for every market / SCR, plus the data audit.
 import { channelsFor, MARKET_KEYS, scrsFor } from '../src/utils/marketData';
-import { computeScenario, DEFAULT_LEVERS } from '../src/utils/scenario';
+import { computeScenario, computeUsefulIntensity, DEFAULT_LEVERS } from '../src/utils/scenario';
 import { auditChannels } from '../src/utils/dataAudit';
 import { eligibleChannels } from '../src/utils/scenario';
 
@@ -25,6 +25,7 @@ for (const m of MARKET_KEYS) {
       `${scr.padEnd(20)} elig ${s.eligibleCount} act ${s.activeCount} prot ${s.protectedCount} (${f(s.protectedWeightShare * 100, 0)}% wt) | ` +
         `ADD ${s.counts.ADD} INC ${s.counts.INCREASE} MNT ${s.counts.MAINTAIN} DEC ${s.counts.DECREASE} hi ${s.highPriority} int ${f(s.interventionRate * 100, 0)}% | ` +
         `moved ${f(s.movedWeight, 2)} pts = ${f(s.movedShareUnprotected * 100, 0)}% unprot / ${f(s.movedShareRoster * 100, 1)}% roster (req ${f(s.requestedWeight, 2)} of ${f(s.unprotectedWeight, 1)}) ${s.limitedBelowRequest ? 'LIMITED' : ''} | ` +
+        `useful<=${computeUsefulIntensity(ch, m, threshold)}% | ` +
         (l2
           ? `net ${f(l2.netReachPoints.low, 2)}/${f(l2.netReachPoints.base, 2)}/${f(l2.netReachPoints.high, 2)} gapClosed ${f(l2.gapClosedShare.low * 100, 0)}/${f(l2.gapClosedShare.base * 100, 0)}/${f(l2.gapClosedShare.high * 100, 0)}% donorLoss ${f(l2.donorReachLossShare.base * 100, 0)}%`
           : 'L2 suppressed')

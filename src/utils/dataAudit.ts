@@ -1,7 +1,8 @@
 // ============================================================
 // DATA AUDIT — flags channel rows that look implausible for the market.
-// Flags never change the data. They only decide whether the scenario
-// engine is allowed to act on a channel (flagged channels are held).
+// Flags never change the data. HOLD flags (NO_COMPETITOR_REF, HIGH_REACH) decide whether the
+// scenario engine may act on a channel. Language is informational only: observed reach is the
+// evidence, so a channel is never held because of its language.
 // ============================================================
 
 import type { ChannelRecord } from './optimization';
@@ -9,12 +10,16 @@ import type { ChannelRecord } from './optimization';
 export type MarketKey = 'UP' | 'Maharashtra' | 'Karnataka';
 
 export type AuditFlag =
-  | 'REGIONAL_LANGUAGE' // channel language does not belong to this market
   | 'NO_COMPETITOR_REF' // Santoor reach but competitor reach < MIN_COMP_REF, so index/lead is not meaningful
   | 'HIGH_REACH'; // Santoor reach above 40% on one channel — verify before acting
 
 /** Competitor reach below this (reach %) is treated as "no usable competitor reference". */
 export const MIN_COMP_REF = 0.5;
+/**
+ * A channel with Santoor or competitor reach at or above this (reach %) is real viewing in this market,
+ * whatever its language. Language notes are only produced below this bar.
+ */
+export const EVIDENCE_REACH = 1.0;
 /** Single-channel Santoor reach above this (reach %) is flagged for verification. */
 export const HIGH_REACH_FLAG = 40;
 
@@ -40,12 +45,12 @@ const LANGUAGE_RULES: LanguageRule[] = [
   {
     language: 'Telugu',
     pattern: /telugu|andhra|\bmaa\b|gemini|etv (abhiruchi|plus|life|cinema)|zee cinemalu|sakshi|tv ?5 news|\bntv\b|\babn\b|\bv6\b|10tv|mahaa|hmtv|studio n/i,
-    homeMarkets: [],
+    homeMarkets: ['Karnataka'], // large Telugu viewing in Bengaluru and the border districts
   },
   {
     language: 'Tamil',
     pattern: /tamil|sun (tv|music|life|news)|kalaignar|jaya|raj (tv|musix|digital|news)|vijay|polimer|thanthi|puthiya|captain|murasu|sirippoli|adithya/i,
-    homeMarkets: [],
+    homeMarkets: ['Karnataka'], // Bengaluru and the Tamil Nadu border
   },
   {
     language: 'Malayalam',
@@ -55,7 +60,7 @@ const LANGUAGE_RULES: LanguageRule[] = [
   {
     language: 'Gujarati',
     pattern: /gujarati|sandesh|vtv|zee 24 kalak|abp asmita|gstv|dd girnar/i,
-    homeMarkets: [],
+    homeMarkets: ['Maharashtra'], // spillover from Gujarat and the Mumbai belt
   },
   {
     language: 'Bengali',
@@ -78,8 +83,12 @@ export function detectLanguage(channelName: string): LanguageRule | null {
 
 export interface ChannelAudit {
   channel: string;
+  /** Hold flags: the engine will not act on a flagged channel. */
   flags: AuditFlag[];
+  /** Reasons behind the hold flags. */
   notes: string[];
+  /** Informational only (never holds a channel): language that is not typical for this market, below the evidence bar. */
+  languageNote: string | null;
 }
 
 export function auditChannel(ch: ChannelRecord, market: MarketKey): ChannelAudit {
@@ -87,11 +96,11 @@ export function auditChannel(ch: ChannelRecord, market: MarketKey): ChannelAudit
   const notes: string[] = [];
   const hasReach = ch.santoorReach > 0 || ch.maxCompReach > 0;
 
-  const lang = hasReach ? detectLanguage(ch.channel) : null;
-  if (lang && !lang.homeMarkets.includes(market)) {
-    flags.push('REGIONAL_LANGUAGE');
-    notes.push(`${lang.language}-language channel with reach in ${market}`);
-  }
+  const lang = hasReach && Math.max(ch.santoorReach, ch.maxCompReach) < EVIDENCE_REACH ? detectLanguage(ch.channel) : null;
+  const languageNote =
+    lang && !lang.homeMarkets.includes(market)
+      ? `${lang.language}-language channel, not typical for ${market}; reach is below ${EVIDENCE_REACH.toFixed(1)}% so it carries little evidence`
+      : null;
   if (ch.santoorReach > 0 && ch.maxCompReach < MIN_COMP_REF) {
     flags.push('NO_COMPETITOR_REF');
     notes.push(
@@ -102,7 +111,7 @@ export function auditChannel(ch: ChannelRecord, market: MarketKey): ChannelAudit
     flags.push('HIGH_REACH');
     notes.push(`Santoor reach ${ch.santoorReach.toFixed(1)}% on a single channel`);
   }
-  return { channel: ch.channel, flags, notes };
+  return { channel: ch.channel, flags, notes, languageNote };
 }
 
 export function auditChannels(channels: ChannelRecord[], market: MarketKey): Map<string, ChannelAudit> {

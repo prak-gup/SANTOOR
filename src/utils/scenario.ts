@@ -271,7 +271,6 @@ export function computeScenario(
     const c = ch.maxCompReach;
 
     if (isWhitespace(ch)) {
-      if (flags.includes('REGIONAL_LANGUAGE')) continue;
       const curve = entryCurve(entryCeiling(c, base.phi));
       // practical limit: 90% of the ceiling (the net-benefit rule normally stops earlier)
       const xMax = -Math.log(0.1) / curve.k;
@@ -526,7 +525,6 @@ export function computeScenario(
         activeCount: active.length,
         isReceiver: !!rc,
         isDonor: !!dn,
-        isWhitespaceRegional: isWhitespace(ch) && flags.includes('REGIONAL_LANGUAGE'),
         intensity,
         anyDonor: donors.length > 0,
       });
@@ -730,7 +728,6 @@ interface MaintainCtx {
   activeCount: number;
   isReceiver: boolean;
   isDonor: boolean;
-  isWhitespaceRegional: boolean;
   intensity: number;
   anyDonor: boolean;
 }
@@ -740,7 +737,7 @@ function maintainReason(x: MaintainCtx): string {
   const r = ch.santoorReach;
   const c = ch.maxCompReach;
   const gapTxt = c >= MIN_COMP_REF ? (r >= c ? `leads ${comp} by ${f1(r - c)} pts` : `behind ${comp} by ${f1(c - r)} pts`) : '';
-  if (x.flags.length > 0 || x.isWhitespaceRegional) {
+  if (x.flags.length > 0) {
     const note = x.auditNotes.length ? x.auditNotes.join('; ') : 'data flag';
     return `Held, data flag: ${note}${x.prot ? ' (also in protected top ' + x.threshold + '%)' : ''}`;
   }

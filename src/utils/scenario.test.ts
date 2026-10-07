@@ -404,16 +404,46 @@ describe('engine behaviour on a controlled region', () => {
     expect(s.eligibleCount).toBe(3); // Layer 1 still works
   });
 
-  it('holds a regional-language channel that does not belong to the market', () => {
+  it('never holds a channel because of its language when it has real reach', () => {
     const rows = syntheticRegion();
     rows.push(ch({ channel: 'ABN Andhra Jyothi', santoorReach: 2.4, maxCompReach: 8 }));
     rows.push(ch({ channel: 'Zee Telugu', santoorReach: 0, maxCompReach: 6, channelShare: 3 }));
     const s = computeScenario(rows, 'UP', { intensity: 100, threshold: 0 });
     for (const n of ['ABN Andhra Jyothi', 'Zee Telugu']) {
-      const o = s.outcomes.get(n)!;
-      expect(o.action).toBe('MAINTAIN');
-      expect(o.reason).toMatch(/data flag/i);
+      expect(s.outcomes.get(n)!.flags).toEqual([]);
+      expect(s.outcomes.get(n)!.reason).not.toMatch(/data flag/i);
     }
+    expect(['INCREASE', 'ADD']).toContain(s.outcomes.get('ABN Andhra Jyothi')!.action);
+  });
+
+  it('no channel with Santoor or competitor reach >= 1.0% is ever held by a language rule (real data)', () => {
+    let checked = 0;
+    for (const c of cells) {
+      const s = c.grid.get(key(15, 30))!;
+      for (const o of s.outcomes.values()) {
+        if (Math.max(o.reach, o.competitorReach) >= 1.0) {
+          checked++;
+          for (const f of o.flags) expect(['NO_COMPETITOR_REF', 'HIGH_REACH']).toContain(f);
+          expect(o.reason).not.toMatch(/language/i);
+        }
+      }
+      for (const ch0 of c.channels) {
+        if (Math.max(ch0.santoorReach, ch0.maxCompReach) >= 1.0) expect(auditChannel(ch0, c.market).languageNote).toBeNull();
+      }
+    }
+    expect(checked).toBeGreaterThan(300);
+  });
+
+  it('keeps the large Telugu and Tamil channels in Karnataka in scope', () => {
+    const k = cells.find(x => x.scr === 'Karnataka Overall')!;
+    const s = k.grid.get(key(15, 30))!;
+    for (const n of ['Gemini Movies', 'Gemini TV', 'STAR Maa', 'Zee Telugu', 'Sun TV']) expect(s.outcomes.has(n), n).toBe(true);
+  });
+
+  it('gives Karnataka Overall a non-trivial plan at the defaults', () => {
+    const s = cells.find(x => x.scr === 'Karnataka Overall')!.grid.get(key(DEFAULT_LEVERS.intensity, DEFAULT_LEVERS.threshold))!;
+    expect(s.counts.ADD + s.counts.INCREASE + s.counts.DECREASE).toBeGreaterThanOrEqual(3);
+    expect(s.movedWeight).toBeGreaterThan(1);
   });
 
   it('holds a channel with no usable competitor reference and one above 40% reach', () => {
@@ -453,8 +483,8 @@ describe('factual notices and parity', () => {
       ch({ channel: 'Big F', santoorReach: 11, maxCompReach: 8 }),
       ch({ channel: 'Big G', santoorReach: 10, maxCompReach: 8 }),
       ch({ channel: 'Big H', santoorReach: 9, maxCompReach: 8 }),
-      ch({ channel: 'Gemini TV', santoorReach: 3, maxCompReach: 1 }),
-      ch({ channel: 'Zee Telugu', santoorReach: 2.5, maxCompReach: 1 }),
+      ch({ channel: 'Gemini TV', santoorReach: 3, maxCompReach: 0.2 }),
+      ch({ channel: 'Zee Telugu', santoorReach: 2.5, maxCompReach: 0.2 }),
     ];
     const s = computeScenario(held, 'Karnataka', { intensity: 50, threshold: 80 });
     expect(s.notice).toMatch(/none of the 2 unprotected active channels can give weight \(2 held by data flags/);
@@ -495,12 +525,22 @@ describe('data audit', () => {
     expect(detectLanguage('Zee Kannada')?.language).toBe('Kannada');
   });
 
-  it('flags Telugu in UP, but not Marathi in Maharashtra or Kannada in Karnataka', () => {
-    const base = { santoorReach: 3, maxCompReach: 4 };
-    expect(auditChannel(ch({ channel: 'ABN Andhra Jyothi', ...base }), 'UP').flags).toContain('REGIONAL_LANGUAGE');
-    expect(auditChannel(ch({ channel: 'Zee Marathi', ...base }), 'Maharashtra').flags).not.toContain('REGIONAL_LANGUAGE');
-    expect(auditChannel(ch({ channel: 'Udaya TV', ...base }), 'Karnataka').flags).not.toContain('REGIONAL_LANGUAGE');
-    expect(auditChannel(ch({ channel: 'Zee Marathi', ...base }), 'UP').flags).toContain('REGIONAL_LANGUAGE');
+  it('only notes (never holds) a language mismatch, and only below the 1.0% evidence bar', () => {
+    const low = { santoorReach: 0.4, maxCompReach: 0.6 };
+    const real = { santoorReach: 3, maxCompReach: 4 };
+    expect(auditChannel(ch({ channel: 'ABN Andhra Jyothi', ...low }), 'UP').languageNote).toMatch(/Telugu/);
+    expect(auditChannel(ch({ channel: 'ABN Andhra Jyothi', ...low }), 'UP').flags).toEqual([]);
+    expect(auditChannel(ch({ channel: 'ABN Andhra Jyothi', ...real }), 'UP').languageNote).toBeNull();
+    expect(auditChannel(ch({ channel: 'Zee Marathi', ...low }), 'UP').languageNote).toMatch(/Marathi/);
+    expect(auditChannel(ch({ channel: 'Zee Marathi', ...low }), 'Maharashtra').languageNote).toBeNull();
+  });
+
+  it('treats Telugu and Tamil as normal Karnataka viewing, Gujarati as Maharashtra spillover', () => {
+    const low = { santoorReach: 0.4, maxCompReach: 0.6 };
+    expect(auditChannel(ch({ channel: 'Gemini TV', ...low }), 'Karnataka').languageNote).toBeNull();
+    expect(auditChannel(ch({ channel: 'Sun TV', ...low }), 'Karnataka').languageNote).toBeNull();
+    expect(auditChannel(ch({ channel: 'Sandesh News', ...low }), 'Maharashtra').languageNote).toBeNull();
+    expect(auditChannel(ch({ channel: 'Sandesh News', ...low }), 'UP').languageNote).toMatch(/Gujarati/);
   });
 
   it('flags the 999 index sentinel and reach above 40%', () => {

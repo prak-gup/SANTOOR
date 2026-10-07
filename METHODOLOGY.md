@@ -108,13 +108,16 @@ Layer 2 is suppressed when a region has fewer than 8 active channels. Layer 1 st
 
 ## 7. Data audit flags (flag, never alter)
 
-The data is displayed as supplied. Three flags decide only whether the engine may act on a channel; flagged channels are always MAINTAIN, with the reason shown in the row.
+The data is displayed as supplied. Two hold flags decide only whether the engine may act on a channel; held channels are always MAINTAIN, with the reason shown in the row.
+
+**Observed reach is the evidence; language is never a reason to drop a channel.** Any channel with Santoor or competitor reach >= 1.0% in the market/SCR is in scope whatever its language. Language is checked only below that bar and only produces an informational note (it never holds a channel). Typical languages per market: Karnataka = Kannada, Telugu, Tamil, Hindi, English (Bengaluru and the border districts watch Telugu and Tamil heavily); Maharashtra = Marathi, Hindi, English, with Gujarati spillover; UP = Hindi, Urdu, Bhojpuri, English. The name patterns live in `dataAudit.ts`.
 
 | Flag | Rule | Why |
 |---|---|---|
-| `REGIONAL_LANGUAGE` | Channel name matches a language that is not the market's home language (e.g. Telugu, Tamil, Malayalam, Gujarati or Marathi in UP; Telugu or Tamil in Karnataka) and the channel has reach. | A planner would not normally buy it for this market. The reach may reflect border-area viewing or a data issue; that cannot be verified from this file. Name patterns are in `dataAudit.ts` and are deliberately short and explicit. |
 | `NO_COMPETITOR_REF` | Santoor reach > 0 and competitor reach < 0.5. | The 999 index sentinel, or an index computed on a near-zero denominator (for example 733 on 0.44 vs 0.06). Lead cannot be assessed. The table shows the index as "n/a". |
 | `HIGH_REACH` | Santoor reach > 40% on one channel. | Verify before acting (Zee Kannada, Udaya TV, Colors Kannada Cinema and Udaya Music exceed it in Karnataka). |
+
+In Karnataka Overall, 17 Telugu/Tamil/Marathi channels that an earlier version held on language alone (for example Gemini Movies 5.7%, Gemini TV 5.0%, Star Maa Movies 5.8%, Zee Cinemalu 3.6%, STAR Maa 3.3%) are now in scope. Those with competitor reach under 0.5 (for example Star Maa Movies) are still held by `NO_COMPETITOR_REF`, which is a data-quality rule, not a language rule. In UP and Maharashtra no in-scope channel was ever held on language.
 
 The table INDEX column shows `n/a` where competitor reach is under 0.5, instead of printing 999.
 
@@ -127,7 +130,7 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 - The average reach gap card is a simple unweighted average over channels, as in the original tool. Its scenario value is modelled on the base curve.
 - Karnataka is an ATC market in the source file, but the engine uses the reach and gap fields exactly as in the other markets. ATC index is shown as observed and is not modelled.
 - Timeband figures are synthetic sample data and are hidden unless the URL has `?debug=1`.
-- The default threshold is **30** (top 30% of Santoor channels frozen), not 70. At 70, Rest of Maharashtra and Karnataka produce no defensible move: protected channels hold 88-97% of the weight, and the few unprotected Karnataka channels are all flagged regional-language channels that the engine holds. At 30 every Overall SCR shows a plan, still small. The meaning of the threshold is unchanged.
+- The default threshold is **30** (top 30% of Santoor channels frozen), not 70. At 70, Rest of Maharashtra produces no defensible move (protected channels hold 88% of the weight and the few unprotected leaders cannot fund the two near-parity receivers); UP and Karnataka move only a little. At 30 every Overall SCR shows a plan, still small. The meaning of the threshold is unchanged. Rest of Maharashtra's useful intensity range stays about 2% because only two channels trail by 0.5+ pts and one white-space channel qualifies; Sangeet Marathi (10.7%) and ABP Majha (4.8%) have no competitor reach and are held by `NO_COMPETITOR_REF`.
 
 ## 9. Data that would upgrade the model
 

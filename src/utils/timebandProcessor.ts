@@ -110,11 +110,26 @@ export function normalizeTimebandString(timeband: string): string {
  * Parse raw timeband data and aggregate across months
  * Handles 'n.a' values and calculates maxCompReach per timeband
  */
+interface RawTimebandRow {
+  Channel?: string;
+  TimeBand?: string;
+  Target_Group?: string;
+  Metric?: string;
+  Value?: number | string | null;
+}
+
+interface TimebandAccumulator {
+  reach: number[];
+  share: number[];
+  ots: number[];
+  competitors: Record<string, number[]>;
+}
+
 export function parseTimebandData(
-  rawData: any[],
+  rawData: RawTimebandRow[],
   market: string
 ): Map<string, TimebandMetrics[]> {
-  const channelTimebandMap = new Map<string, Map<string, any>>();
+  const channelTimebandMap = new Map<string, Map<string, TimebandAccumulator>>();
 
   // Group by channel and timeband
   for (const row of rawData) {
@@ -144,6 +159,7 @@ export function parseTimebandData(
 
     // Aggregate metrics
     if (row.Metric === 'Cume Rch% Curve [1+]') {
+      if (!row.Target_Group) continue;
       if (row.Target_Group === 'Santoor') {
         data.reach.push(value);
       } else {

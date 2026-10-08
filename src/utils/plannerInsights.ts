@@ -15,9 +15,7 @@ import { TIMEBAND_DISPLAY_V2 } from './timebandProcessor';
  * Focuses on 3 key metrics, 1 top action, and 1 simple recommendation
  */
 export function generateSimplifiedInsights(
-  channel: ChannelRecord,
-  _market: string,
-  _allChannelsInMarket: ChannelRecord[]
+  channel: ChannelRecord
 ): SimplifiedPlannerInsights {
   if (!channel.timebands || channel.timebands.length === 0) {
     return getEmptySimplifiedInsights();
@@ -122,7 +120,7 @@ function findTopAction(timebands: TimebandMetrics[]): {
 
   // Determine priority based on timeband and gap size
   let priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
-  let action: 'INVEST' | 'MAINTAIN' | 'REDUCE' = 'INVEST';
+  const action: 'INVEST' | 'MAINTAIN' | 'REDUCE' = 'INVEST';
 
   if (worstBand.timeband === 'CPT' && worstGap < -5) {
     priority = 'HIGH';
@@ -224,7 +222,7 @@ export function generatePlannerInsights(
   const budgetAllocationRecommendation = optimizeBudgetAllocation(channel.timebands);
   const primeTimePerformance = analyzePrimeTimePerformance(channel.timebands);
   const channelBenchmark = benchmarkAgainstMarket(channel, allChannelsInMarket);
-  const topActions = generatePrioritizedActions(channel.timebands, market);
+  const topActions = generatePrioritizedActions(channel.timebands);
   const marketDynamics = analyzeMarketDynamics(market, channel);
 
   const totalReachAcrossTimebands = channel.timebands.reduce(
@@ -441,8 +439,7 @@ function benchmarkAgainstMarket(
  * Generate top 3-5 prioritized actions
  */
 function generatePrioritizedActions(
-  timebands: TimebandMetrics[],
-  _market: string
+  timebands: TimebandMetrics[]
 ) {
   const actions: Array<{
     priority: 'HIGH' | 'MEDIUM' | 'LOW';

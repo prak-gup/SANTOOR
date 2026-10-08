@@ -357,16 +357,13 @@ export function calculateDistrictChannels(
     // Scale timeband data if present
     let timebands = ch.timebands;
     if (timebands) {
-      const rawAdjusted = timebands.map(tb => {
-        const tbAdjust = getTimebandUrbanShift(tb.timeband, district.urbanPct);
-        return { ...tb, _weight: tbAdjust };
-      });
+      const weights = timebands.map(tb => getTimebandUrbanShift(tb.timeband, district.urbanPct));
 
       // Normalize so proportions sum to original proportions
-      const totalWeight = rawAdjusted.reduce((s, t) => s + t._weight, 0);
+      const totalWeight = weights.reduce((s, w) => s + w, 0);
 
-      timebands = rawAdjusted.map(tb => {
-        const normalizedAdjust = (tb._weight / totalWeight) * rawAdjusted.length;
+      timebands = timebands.map((tb, i) => {
+        const normalizedAdjust = (weights[i] / totalWeight) * weights.length;
         const tbSantoor = +(tb.santoorReach * finalFactor * normalizedAdjust).toFixed(2);
         const tbComp = +(tb.maxCompReach * compFactor1 * normalizedAdjust).toFixed(2);
         const tbGodrej = tb.godrejReach != null ? +(tb.godrejReach * compFactor1 * normalizedAdjust).toFixed(2) : undefined;
@@ -381,12 +378,8 @@ export function calculateDistrictChannels(
           luxReach: tbLux,
           maxCompReach: Math.max(tbGodrej || 0, tbLux || 0, tbComp),
           gap: +(tbSantoor - Math.max(tbGodrej || 0, tbLux || 0, tbComp)).toFixed(2),
-          _weight: undefined,
         };
       });
-
-      // Clean up _weight
-      timebands = timebands.map(({ _weight, ...rest }: any) => rest);
     }
 
     return {

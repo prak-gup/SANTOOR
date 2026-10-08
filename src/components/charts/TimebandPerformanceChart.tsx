@@ -27,7 +27,6 @@ const COMPETITOR_COLORS: Record<string, string> = {
 
 export const TimebandPerformanceChart: React.FC<TimebandPerformanceChartProps> = ({
   channel,
-  competitors: _competitors,
   market
 }) => {
   if (!channel.timebands || channel.timebands.length === 0) {
@@ -45,7 +44,7 @@ export const TimebandPerformanceChart: React.FC<TimebandPerformanceChartProps> =
   }
 
   const chartData = channel.timebands.map(tb => {
-    const data: any = {
+    const data: Record<string, string | number> = {
       timeband: TIMEBAND_DISPLAY_V2[tb.timeband as keyof typeof TIMEBAND_DISPLAY_V2] || tb.timeband,
       Santoor: tb.santoorReach
     };

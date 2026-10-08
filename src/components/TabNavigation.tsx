@@ -6,16 +6,18 @@ interface TabNavigationProps {
   activeTab: TabKey;
   onTabChange: (tab: TabKey) => void;
   showDistrictTab?: boolean;
+  /** Timeband data is synthetic sample data; the tab is only offered in debug mode. */
+  showTimebandTab?: boolean;
 }
 
-const TAB_CONFIG: { key: TabKey; icon: string; label: string; hint: string; districtOnly?: boolean }[] = [
+const TAB_CONFIG: { key: TabKey; icon: string; label: string; hint: string; districtOnly?: boolean; debugOnly?: boolean }[] = [
   { key: 'channel', icon: '📊', label: 'Channel Analysis', hint: 'View and optimize channel-level performance across all markets and SCRs' },
-  { key: 'timeband', icon: '📺', label: 'Timeband Analysis', hint: 'Analyze performance across 4 timebands (NPT, NCPT Early, CPT, NCPT Late) with strategic insights' },
+  { key: 'timeband', icon: '📺', label: 'Timeband Analysis', hint: 'Debug only: illustrative sample data, not measured timeband reach', debugOnly: true },
   { key: 'district', icon: '🗺️', label: 'District Analysis', hint: 'Drill into district-level channel and timeband reach for UP (47 districts across 5 SERs)', districtOnly: true },
 ];
 
-const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onTabChange, showDistrictTab = false }) => {
-  const visibleTabs = TAB_CONFIG.filter(t => !t.districtOnly || showDistrictTab);
+const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onTabChange, showDistrictTab = false, showTimebandTab = false }) => {
+  const visibleTabs = TAB_CONFIG.filter(t => (!t.districtOnly || showDistrictTab) && (!t.debugOnly || showTimebandTab));
   const activeHint = visibleTabs.find(t => t.key === activeTab)?.hint || '';
 
   return (

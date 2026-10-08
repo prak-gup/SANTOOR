@@ -200,6 +200,10 @@ const DISPLAY_TO_MARKET: Record<string, MarketName> = {
   'Karnataka': 'Karnataka'
 };
 
+// Under the conservative caps nothing moves beyond roughly 15-20% in any market, so the slider
+// stops where the model stops responding; the rest of the travel would be dead.
+const INTENSITY_MAX = 30;
+
 export default function App() {
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -585,7 +589,7 @@ export default function App() {
                     </InfoButton>
                   </label>
                   <div style={{ position: 'relative' }}>
-                    {usefulIntensity < 100 && (
+                    {usefulIntensity < INTENSITY_MAX && (
                       <div
                         aria-hidden="true"
                         title={`No defensible move remains beyond ${usefulIntensity}%`}
@@ -594,7 +598,7 @@ export default function App() {
                           top: '50%',
                           height: '10px',
                           transform: 'translateY(-50%)',
-                          left: `calc(${usefulIntensity}% * 0.96 + 2%)`,
+                          left: `calc(${(usefulIntensity / INTENSITY_MAX) * 100}% * 0.96 + 2%)`,
                           right: '1%',
                           borderRadius: '5px',
                           background: 'repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 4px, var(--border) 4px, var(--border) 8px)',
@@ -607,8 +611,8 @@ export default function App() {
                     <input
                       type="range"
                       min="0"
-                      max="100"
-                      step="5"
+                      max={INTENSITY_MAX}
+                      step="1"
                       value={intensity}
                       onChange={e => setIntensity(+e.target.value)}
                       style={{ width: '100%' }}

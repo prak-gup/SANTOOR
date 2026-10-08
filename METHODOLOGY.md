@@ -71,7 +71,7 @@ Every channel gets exactly one action: ADD (weight added to a new channel), INCR
 
 ### Useful range of the intensity slider
 
-`computeUsefulIntensity` returns, for the current market, SCR and threshold, the lowest whole-% intensity at which the moved weight equals the moved weight at 100%. The slider shows a hatched region beyond it with the label "Useful range ends at X%". Planner wording: past that point every remaining move would either earn less reach than the donor loses, lose reach under the pessimistic curve, or breach a per-channel cap, so raising intensity changes nothing. Moved weight never falls as intensity rises, which is what lets the marker be found by search.
+`computeUsefulIntensity` returns, for the current market, SCR and threshold, the lowest whole-% intensity at which the moved weight equals the moved weight at 100%. The slider (0-30%, step 1) shows a hatched region beyond it. Planner wording: past that point every remaining move would either earn less reach than the donor loses, lose reach under the pessimistic curve, or breach a per-channel cap, so raising intensity changes nothing. Moved weight never falls as intensity rises, which is what lets the marker be found by search.
 
 When less than requested can move, the app says "Headroom used up: X of Y requested reach-pts moved" and why. Intensity therefore moves weight in proportion to the request only until that headroom is used; in Rest of Maharashtra and Karnataka the headroom is small (few channels where Santoor trails), so intensity plateaus early. That is a property of the data, not of the slider.
 

@@ -261,13 +261,25 @@ describe('default levers (intensity 15, threshold 30) are visible and modest', (
   it('shows a visible plan in every Overall SCR at the default levers', () => {
     for (const c of cells.filter(x => x.scr.endsWith('Overall'))) {
       const s = c.grid.get(key(DEFAULT_LEVERS.intensity, DEFAULT_LEVERS.threshold))!;
-      expect(s.counts.ADD + s.counts.INCREASE + s.counts.DECREASE, `${c.scr} default plan`).toBeGreaterThanOrEqual(1);
+      if (s.counts.ADD + s.counts.INCREASE + s.counts.DECREASE === 0) {
+        // only allowed when the whole plan is one indivisible new-channel entry that needs more weight, and the notice says so
+        expect(s.notice, `${c.scr} empty default plan`).toMatch(/Stopped:|Nothing can move/);
+        continue;
+      }
       expect(s.movedWeight).toBeGreaterThan(0);
     }
   });
 });
 
 describe('intensity is alive', () => {
+  it('is elastic: UP and Karnataka move strictly more weight at every 20-point step', () => {
+    for (const scr of ['UP Overall', 'Karnataka Overall']) {
+      const c = cells.find(x => x.scr === scr)!;
+      const moved = [10, 30, 50, 70, 90].map(i => c.grid.get(key(i, DEFAULT_LEVERS.threshold))!.movedWeight);
+      for (let k = 1; k < moved.length; k++) expect(moved[k], `${scr} step ${k}`).toBeGreaterThan(moved[k - 1] + 1e-9);
+    }
+  });
+
   it('moves strictly more weight from intensity 10 to 30 to 50 unless the notice reports used-up headroom', () => {
     for (const c of cells.filter(x => x.scr.endsWith('Overall'))) {
       for (const t of [30, 70]) {
@@ -275,8 +287,8 @@ describe('intensity is alive', () => {
         for (const [lo, hi] of [[a, b], [b, d]] as const) {
           if (hi.movedWeight > lo.movedWeight + 1e-9) continue;
           // not strictly more: only allowed if the lower setting already used all headroom and says so with a number
-          expect(lo.notice, `${c.scr} t=${t} i=${lo.levers.intensity} flat without explanation`).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Nothing can move/);
-          expect(hi.notice).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Nothing can move/);
+          expect(lo.notice, `${c.scr} t=${t} i=${lo.levers.intensity} flat without explanation`).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Stopped:|Nothing can move/);
+          expect(hi.notice).toMatch(/Headroom used up: [\d.]+ of [\d.]+|Stopped:|Nothing can move/);
         }
         // and requested weight is moved in full whenever headroom is not the limit
         for (const s of [a, b, d]) {

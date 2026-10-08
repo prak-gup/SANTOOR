@@ -27,7 +27,7 @@ export interface Levers {
   threshold: number;
 }
 
-export const DEFAULT_LEVERS: Levers = { intensity: 15, threshold: 30 };
+export const DEFAULT_LEVERS: Levers = { intensity: 60, threshold: 30 };
 
 export const MODEL_PARAMS = {
   /** Behind channels need at least this reach gap (pts) to be a receiver. */
@@ -243,10 +243,28 @@ interface Donor {
   m0: number;
 }
 
+/**
+ * Intensity is the share of the defensible headroom that is used: 100% moves every reallocation that still
+ * passes the benefit rule, the low-case check and the per-channel caps, 50% moves half of that weight, and so on.
+ * The headroom is found by one unrestricted run, so every slider step moves a proportional amount of weight.
+ */
 export function computeScenario(
   allChannels: ChannelRecord[],
   market: MarketKey,
   levers: Levers
+): ScenarioResult {
+  const i = Math.min(100, Math.max(0, levers.intensity));
+  const headroom = runScenario(allChannels, market, { ...levers, intensity: 100 }).movedWeight;
+  // No headroom at all: keep the plain request so the notice explains why nothing moves.
+  if (headroom <= EPS) return runScenario(allChannels, market, levers);
+  return runScenario(allChannels, market, levers, (i / 100) * headroom);
+}
+
+function runScenario(
+  allChannels: ChannelRecord[],
+  market: MarketKey,
+  levers: Levers,
+  requestedOverride?: number
 ): ScenarioResult {
   const intensity = Math.min(100, Math.max(0, levers.intensity));
   const threshold = Math.min(100, Math.max(0, levers.threshold));
@@ -326,7 +344,7 @@ export function computeScenario(
     .filter(c => !protectedSet.has(c.channel))
     .reduce((s, c) => s + c.santoorReach, 0);
   const protectedWeight = rosterWeight - unprotectedWeight;
-  const requestedWeight = (intensity / 100) * unprotectedWeight;
+  const requestedWeight = requestedOverride ?? (intensity / 100) * unprotectedWeight;
 
   // ---- greedy water-filling --------------------------------
   // The sequence of moves depends only on (data, threshold). Intensity decides how far along

@@ -580,10 +580,10 @@ export default function App() {
                           ⚡ OPTIMIZATION INTENSITY
                         </div>
                         <div style={{ marginBottom: '8px', fontSize: '11px', lineHeight: '1.5' }}>
-                          Share of the unprotected reach-point weight that is reallocated. 0% changes nothing.
+                          How much of the defensible reallocation is applied. 0% changes nothing; 100% makes every move that still passes the checks.
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                          <div>Only moves that still pay off under the pessimistic curve are made, so very high values can plateau.</div>
+                          <div>Moves that would lose reach under the pessimistic curve are never made.</div>
                         </div>
                       </div>
                     </InfoButton>

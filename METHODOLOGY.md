@@ -159,3 +159,9 @@ The table INDEX column shows `n/a` where competitor reach is under 0.5, instead 
 | Slices | 200 |
 | Layer 2 minimum active channels | 8 |
 | Bands (`phi`, `eta`, `phiDonor`) | low (0.50, 0.50, 1.00), base (0.75, 0.25, 0.75), high (1.00, 0.10, 0.50) |
+
+## Intensity scale (elasticity)
+
+Intensity is the share of the *defensible headroom* that is applied. The engine first finds the headroom H: the weight moved when every reallocation that passes the benefit rule, the low-case check and the per-channel caps is made (an unrestricted run). The scenario then moves (intensity / 100) x H along the same ranked sequence of moves, so each slider step moves proportionally more weight and a lower intensity is always a prefix of a higher one. 0% changes nothing, 100% is the most the model can defend. The default is 60% intensity, 30% threshold.
+
+Consequences a planner should know: Rest of Maharashtra at threshold 30 has a single feasible plan (one new channel funded by three donors), so it stays unchanged until the slider is high enough to fund that entry; the notice says how much weight the entry needs. The hatched useful-range marker only appears if moved weight stops growing before 100%, which the headroom scaling now makes rare.
